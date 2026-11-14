@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>พิจารณาไม่อนุมัติคำขอลา</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    body {
+      font-family: 'Prompt', sans-serif;
+      background-color: #F8FAFC;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col justify-between py-6 px-4 sm:px-6">
+
+  <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+
+    <!-- HEADER (RED / DANGER) -->
+    <div class="bg-gradient-to-r from-red-600 to-rose-700 px-6 py-6 text-white text-center">
+      <div class="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i class="fa-solid fa-circle-xmark text-2xl text-white"></i>
+      </div>
+      <h1 class="text-xl font-bold tracking-wide">ไม่อนุมัติคำขอลา</h1>
+      <p class="text-xs text-red-100 mt-1">กรุณาระบุเหตุผลเพื่อแจ้งพนักงานและฝ่ายบุคคล</p>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loadingOverlay" class="p-8 text-center">
+      <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-red-600 border-t-transparent mb-3"></div>
+      <p id="loadingText" class="text-sm text-gray-500 font-medium">กำลังโหลดข้อมูล...</p>
+    </div>
+
+    <!-- FORM -->
+    <form id="rejectForm" class="p-6 space-y-4 hidden">
+
+      <!-- REQUEST INFO CARD -->
+      <div class="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-gray-500">รหัสคำขอ:</span>
+          <span id="displayReqId" class="text-xs font-mono font-bold text-gray-800">-</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-gray-500">พนักงานผู้ขอลา:</span>
+          <span id="displayEmpName" class="text-xs font-medium text-gray-800">กำลังโหลด...</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-gray-500">ประเภทการลา:</span>
+          <span id="displayLeaveType" class="text-xs font-medium text-red-600">-</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-xs text-gray-500">ช่วงวันที่ลา:</span>
+          <span id="displayDates" class="text-xs font-medium text-gray-700">-</span>
+        </div>
+      </div>
+
+      <!-- REASON INPUT -->
+      <div>
+        <label for="rejectReason" class="block text-xs font-semibold text-gray-700 mb-1.5">
+          เหตุผลที่ไม่อนุมัติ <span class="text-red-500">*</span>
+        </label>
+        <textarea id="rejectReason" required rows="4"
+                  placeholder="เช่น ติดภารกิจงานด่วนส่งมอบลูกค้า, อัตรากำลังในทีมไม่เพียงพอในวันดังกล่าว..."
+                  class="w-full p-3 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition"></textarea>
+        <p class="text-[11px] text-gray-400 mt-1">
+          * ข้อความนี้จะถูกส่งแจ้งไปยัง LINE ของพนักงาน และส่งรายงานให้ฝ่ายบุคคล (HR) ทราบ
+        </p>
+      </div>
+
+      <!-- SUBMIT BUTTON -->
+      <div class="pt-2">
+        <button type="submit" id="submitBtn"
+                class="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-red-500/30 transition transform active:scale-[0.98] flex items-center justify-center space-x-2">
+          <i class="fa-solid fa-circle-xmark"></i>
+          <span>ยืนยันการไม่อนุมัติ</span>
+        </button>
+      </div>
+
+    </form>
+  </div>
+
+  <div class="text-center text-xs text-gray-400 mt-6">
+    ระบบบริหารการลา &bull; Connected with LINE &amp; Supabase
+  </div>
+
+  <script>
+    const LIFF_ID = "__LIFF_ID__";
+    const API_BASE = window.location.origin;
+    const API_URL = API_BASE + "/api";
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const reqId = urlParams.get("reqId") || "";
+    const urlUid = urlParams.get("uid") || "";
+    const sig = urlParams.get("sig") || "";
+
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    const loadingText = document.getElementById("loadingText");
+    const rejectForm = document.getElementById("rejectForm");
+    const displayReqId = document.getElementById("displayReqId");
+    const displayEmpName = document.getElementById("displayEmpName");
+    const displayLeaveType = document.getElementById("displayLeaveType");
+    const displayDates = document.getElementById("displayDates");
+    const rejectReasonInput = document.getElementById("rejectReason");
+    const submitBtn = document.getElementById("submitBtn");
+
+    let idToken = "";
+    let approverUserId = urlUid || "";
+
+    async function initializeLiff() {
+      try {
+        if (!reqId) {
+          throw new Error("ไม่พบรหัสคำขอลา (reqId)");
+        }
+        displayReqId.textContent = reqId;
+
+        // Try LIFF init gracefully if available
+        try {
+          if (typeof liff !== "undefined" && LIFF_ID && !LIFF_ID.startsWith("__")) {
+            await liff.init({ liffId: LIFF_ID });
+            if (liff.isLoggedIn()) {
+              idToken = liff.getIDToken() || "";
+              try {
+                const profile = await liff.getProfile();
+                if (profile && profile.userId) {
+                  approverUserId = profile.userId;
+                }
+              } catch (pe) {
+                console.warn("Could not get LIFF profile:", pe);
+              }
+            }
+          }
+        } catch (liffErr) {
+          console.warn("LIFF init skipped/failed:", liffErr);
+        }
+
+        // Only redirect to login if we have NO signature AND NO login session
+        if (!sig && !idToken && typeof liff !== "undefined" && liff.isLoggedIn && !liff.isLoggedIn()) {
+          loadingText.textContent = "กำลังเข้าสู่ระบบ LINE...";
+          liff.login({ redirectUri: window.location.href });
+          return;
+        }
+
+        // Fetch request detail
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fn: "getLeaveRequestDetail",
+            args: [reqId]
+          })
+        });
+
+        const data = await response.json();
+        if (data && data.ok && data.result) {
+          const req = data.result;
+          displayEmpName.textContent = req.employee_name || "ไม่ระบุ";
+          displayLeaveType.textContent = req.leave_type || "-";
+          displayDates.textContent = (req.start_date === req.end_date)
+            ? req.start_date + " (" + req.total_days + " วัน)"
+            : req.start_date + " ถึง " + req.end_date + " (" + req.total_days + " วัน)";
+        } else {
+          displayEmpName.textContent = "คำขอ: " + reqId;
+        }
+
+        loadingOverlay.classList.add("hidden");
+        rejectForm.classList.remove("hidden");
+
+      } catch (err) {
+        console.error("Init error:", err);
+        loadingOverlay.innerHTML = `
+          <div class="text-red-500 text-center p-4">
+            <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
+            <p class="font-semibold text-sm">${err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล"}</p>
+          </div>
+        `;
+      }
+    }
+
+    rejectForm.addEventListener("submit", async function(e) {
+      e.preventDefault();
+      const reason = rejectReasonInput.value.trim();
+      if (!reason) {
+        Swal.fire({ icon: "warning", title: "กรุณาระบุเหตุผล", text: "ต้องระบุเหตุผลเพื่อแจ้งพนักงานและฝ่ายบุคคล" });
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> กำลังบันทึก...';
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fn: "rejectLeaveRequest",
+            args: [{ reqId, reason, idToken, approverLineId: approverUserId, sig }]
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`เซิร์ฟเวอร์ตอบกลับ HTTP ${response.status}: ${errText}`);
+        }
+
+        const result = await response.json();
+        if (!result.ok) throw new Error(result.error || (result.result && result.result.message) || "บันทึกไม่สำเร็จ");
+
+        await Swal.fire({
+          icon: "success",
+          title: "บันทึกผลเรียบร้อย",
+          text: "ระบบได้บันทึกการไม่อนุมัติ และแจ้งผลไปยังพนักงานและ HR แล้ว",
+          confirmButtonColor: "#EF4444"
+        });
+
+        if (typeof liff !== "undefined" && liff.isInClient && liff.isInClient()) {
+          liff.closeWindow();
+        } else {
+          window.close();
+          document.body.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center p-6 text-center">
+              <div class="bg-white p-8 rounded-2xl shadow-lg max-w-sm">
+                <i class="fa-solid fa-circle-check text-green-500 text-5xl mb-4"></i>
+                <h2 class="text-lg font-bold text-gray-800">ดำเนินการเรียบร้อยแล้ว</h2>
+                <p class="text-xs text-gray-500 mt-2">คุณสามารถปิดหน้าต่างเบราว์เซอร์นี้ได้เลยครับ</p>
+              </div>
+            </div>`;
+        }
+      } catch (err) {
+        console.error("Submit error:", err);
+        Swal.fire({ icon: "error", title: "เกิดข้อผิดพลาด", text: err.message });
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> ยืนยันการไม่อนุมัติ';
+      }
+    });
+
+    window.addEventListener("DOMContentLoaded", initializeLiff);
+  </script>
+
+</body>
+
+</html>

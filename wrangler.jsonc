@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "line-leave-relay",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-08",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://tsjfqjisabmbrgbdgyif.supabase.co",
+    "ALLOW_ROOT_MANAGER_REGISTRATION": "true",
+    "APPROVER_LINE_USER_IDS": "U7c04ba211a5fc02c29f834adf9fbc538",
+    "HR_LINE_USER_IDS": "U7c04ba211a5fc02c29f834adf9fbc538",
+    "LIFF_ID_REGISTER": "2011955364-O2qTmo0r",
+    "LIFF_ID_LEAVE": "2011955364-FCY27ABh"
+  },
+  "triggers": {
+    "crons": [
+      "0 1 * * *"
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

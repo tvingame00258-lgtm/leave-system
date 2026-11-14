@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบยื่นใบลา</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    body { font-family: 'Prompt', sans-serif; background-color: #F3F4F6; }
+
+    .leave-type-card input:checked + label {
+      border-color: #2563EB;
+      background-color: #EFF6FF;
+      color: #1E40AF;
+      box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.1), 0 2px 4px -1px rgba(37, 99, 235, 0.06);
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col justify-between py-6 px-4 sm:px-6">
+
+  <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+
+    <!-- HEADER -->
+    <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 px-6 py-6 text-white text-center">
+      <div class="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i class="fa-solid fa-calendar-check text-2xl text-white"></i>
+      </div>
+      <h1 class="text-xl font-bold tracking-wide">แบบฟอร์มยื่นใบลา</h1>
+      <p class="text-xs text-blue-100 mt-1">ส่งคำขออนุมัติไปยังหัวหน้างานอัตโนมัติ</p>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loadingOverlay" class="p-8 text-center">
+      <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent mb-3"></div>
+      <p id="loadingText" class="text-sm text-gray-500 font-medium">กำลังเชื่อมต่อ LINE LIFF...</p>
+      <p id="loadingTime" class="text-[10px] text-gray-400 mt-2"></p>
+    </div>
+
+    <!-- UNREGISTERED -->
+    <div id="unregisteredBox" class="p-6 text-center hidden space-y-4">
+      <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-2xl">
+        <i class="fa-solid fa-user-xmark"></i>
+      </div>
+      <h2 class="text-lg font-bold text-gray-800">ยังไม่พบข้อมูลการลงทะเบียน</h2>
+      <p class="text-sm text-gray-600">
+        คุณจำเป็นต้องลงทะเบียนข้อมูลพนักงานและระบุหัวหน้าผู้อนุมัติก่อน
+        จึงจะสามารถเริ่มยื่นใบลาได้
+      </p>
+      <div class="pt-3">
+        <button id="goToRegisterBtn" type="button"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-xl shadow-md transition-all">
+          <i class="fa-solid fa-user-plus mr-1"></i>
+          ไปยังหน้าลงทะเบียนพนักงาน
+        </button>
+      </div>
+    </div>
+
+    <!-- LEAVE FORM -->
+    <form id="leaveForm" class="p-6 space-y-4 hidden">
+
+      <!-- EMPLOYEE PROFILE CARD -->
+      <div class="p-3.5 bg-gradient-to-br from-slate-50 to-blue-50/40 rounded-xl border border-slate-200">
+        <div class="flex items-start justify-between mb-2">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-sm flex-shrink-0">
+              <i class="fa-solid fa-user"></i>
+            </div>
+            <div>
+              <span id="empNameDisplay" class="text-sm font-bold text-gray-900 block leading-tight">พนักงาน</span>
+              <span id="empIdDisplay" class="text-[10px] font-mono text-gray-500">รหัส: -</span>
+            </div>
+          </div>
+          <span id="empCompanyDisplay" class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md font-medium text-right max-w-[170px] truncate">
+            บริษัท
+          </span>
+        </div>
+
+        <div class="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs text-gray-600">
+          <div>
+            <span class="text-gray-400 text-[10px] block">ฝ่าย / แผนก</span>
+            <span id="empDeptDivDisplay" class="font-medium text-gray-800 text-[11px]">-</span>
+          </div>
+          <div class="text-right">
+            <span class="text-gray-400 text-[10px] block">ตำแหน่ง</span>
+            <span id="empPosDisplay" class="font-medium text-gray-800 text-[11px]">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- HIDDEN -->
+      <input type="hidden" id="employeeLineId">
+      <input type="hidden" id="employeeName">
+      <input type="hidden" id="department">
+      <input type="hidden" id="managerLineId">
+
+      <!-- LEAVE TYPE -->
+      <div>
+        <label class="block text-xs font-semibold text-gray-700 mb-2">
+          ประเภทการลา <span class="text-red-500">*</span>
+        </label>
+
+        <div class="grid grid-cols-3 gap-2">
+
+          <div class="leave-type-card">
+            <input type="radio" id="typeSick" name="leaveType" value="ลาป่วย" class="hidden" checked>
+            <label for="typeSick"
+                   class="flex flex-col items-center justify-center p-2.5 rounded-xl border-2 border-gray-200 cursor-pointer transition-all hover:border-blue-400 text-center">
+              <i class="fa-solid fa-notes-medical text-base text-emerald-500 mb-1"></i>
+              <span class="text-xs font-semibold">ลาป่วย</span>
+            </label>
+          </div>
+
+          <div class="leave-type-card">
+            <input type="radio" id="typeBusiness" name="leaveType" value="ลากิจ" class="hidden">
+            <label for="typeBusiness"
+                   class="flex flex-col items-center justify-center p-2.5 rounded-xl border-2 border-gray-200 cursor-pointer transition-all hover:border-blue-400 text-center">
+              <i class="fa-solid fa-briefcase text-base text-amber-500 mb-1"></i>
+              <span class="text-xs font-semibold">ลากิจ</span>
+            </label>
+          </div>
+
+          <div class="leave-type-card">
+            <input type="radio" id="typeVacation" name="leaveType" value="ลาพักร้อน" class="hidden">
+            <label for="typeVacation"
+                   class="flex flex-col items-center justify-center p-2.5 rounded-xl border-2 border-gray-200 cursor-pointer transition-all hover:border-blue-400 text-center">
+              <i class="fa-solid fa-umbrella-beach text-base text-sky-500 mb-1"></i>
+              <span class="text-xs font-semibold">ลาพักร้อน</span>
+            </label>
+          </div>
+
+          <div class="leave-type-card col-span-1">
+            <input type="radio" id="typeUnpaid" name="leaveType" value="ลาไม่ได้รับค่าจ้าง" class="hidden">
+            <label for="typeUnpaid"
+                   class="flex flex-col items-center justify-center p-2.5 rounded-xl border-2 border-gray-200 cursor-pointer transition-all hover:border-blue-400 text-center">
+              <i class="fa-solid fa-money-bill-wave text-base text-rose-500 mb-1"></i>
+              <span class="text-xs font-semibold">ไม่รับค่าจ้าง</span>
+            </label>
+          </div>
+
+          <div class="leave-type-card col-span-2">
+            <input type="radio" id="typeOther" name="leaveType" value="อื่นๆ" class="hidden">
+            <label for="typeOther"
+                   class="flex flex-col items-center justify-center p-2.5 rounded-xl border-2 border-gray-200 cursor-pointer transition-all hover:border-blue-400 text-center">
+              <i class="fa-solid fa-ellipsis text-base text-indigo-500 mb-1"></i>
+              <span class="text-xs font-semibold">อื่นๆ (ระบุ)</span>
+            </label>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- OTHER LEAVE DETAIL (CONDITIONAL) -->
+      <div id="otherDetailBox" class="hidden animate-fadeIn">
+        <label for="otherLeaveDetail" class="block text-xs font-semibold text-indigo-700 mb-1">
+          ระบุประเภทการลาเพิ่มเติม <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-indigo-400">
+            <i class="fa-solid fa-pen text-xs"></i>
+          </div>
+          <input type="text" id="otherLeaveDetail" placeholder="เช่น ลาคลอด, ลาอุปสมบท, ลาฝึกอบรม"
+                 class="w-full pl-8 pr-3 py-2 text-xs border border-indigo-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-indigo-50/30">
+        </div>
+      </div>
+
+      <!-- BUSINESS LEAVE NOTICE -->
+      <div id="businessNoticeBox" class="p-2.5 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] text-amber-800 flex items-start space-x-2">
+        <i class="fa-solid fa-circle-info mt-0.5 text-amber-600 text-xs"></i>
+        <div class="flex-1 leading-snug">
+          <strong>หมายเหตุ:</strong> การลากิจควรยื่นคำขอล่วงหน้า ระบบจะบันทึกทั้งวันที่ลงคำขอและช่วงวันที่ลาใช้สิทธิจริงสำหรับ HR ตรวจสอบ
+        </div>
+      </div>
+
+      <!-- DATE -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="startDate" class="block text-xs font-semibold text-gray-700 mb-1">
+            วันที่เริ่มต้น <span class="text-red-500">*</span>
+          </label>
+          <input type="date" id="startDate" required
+                 class="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+        </div>
+        <div>
+          <label for="endDate" class="block text-xs font-semibold text-gray-700 mb-1">
+            วันที่สิ้นสุด <span class="text-red-500">*</span>
+          </label>
+          <input type="date" id="endDate" required
+                 class="w-full px-3 py-2 text-xs border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+        </div>
+      </div>
+
+      <!-- TOTAL DAYS -->
+      <div>
+        <label for="totalDays" class="block text-xs font-semibold text-gray-700 mb-1">
+          จำนวนวันลา (วัน) <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-clock text-xs"></i>
+          </div>
+          <input type="number" id="totalDays" step="0.5" min="0.5" value="1" required
+                 class="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-semibold text-blue-700">
+        </div>
+        <p class="text-[11px] text-gray-400 mt-0.5">* คำนวณอัตโนมัติ หรือปรับแก้ได้ (เช่น 0.5 วัน)</p>
+      </div>
+
+      <!-- REASON -->
+      <div>
+        <label for="reason" class="block text-xs font-semibold text-gray-700 mb-1">
+          เหตุผลการลา <span class="text-red-500">*</span>
+        </label>
+        <textarea id="reason" rows="3" required maxlength="500"
+                  placeholder="ระบุเหตุผลความจำเป็นในการลา..."
+                  class="w-full p-3 text-xs border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"></textarea>
+      </div>
+
+      <!-- NOTICE -->
+      <div id="managerNoticeBox"
+           class="p-3 bg-blue-50/70 rounded-xl border border-blue-200 text-xs text-blue-800 flex items-start space-x-2">
+        <i class="fa-solid fa-paper-plane mt-0.5 text-blue-600"></i>
+        <div class="flex-1">คำขอนี้จะถูกส่งตรงไปยัง LINE ของหัวหน้าเพื่อพิจารณาอนุมัติ</div>
+      </div>
+
+      <!-- SUBMIT -->
+      <div class="pt-2">
+        <button type="submit" id="submitBtn"
+                class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all transform active:scale-[0.98] flex items-center justify-center space-x-2">
+          <i class="fa-solid fa-paper-plane"></i>
+          <span>ส่งใบลาเพื่อขออนุมัติ</span>
+        </button>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="text-center text-xs text-gray-400 mt-6">
+    ระบบลาและอนุมัติงาน &bull; ขับเคลื่อนด้วย Google Sheets &amp; LINE Messaging API
+  </div>
+
+  <script>
+/* ===================== CONFIG ===================== */
+
+const LIFF_ID = "__LIFF_ID__";
+const REGISTER_LIFF_ID = "__REGISTER_LIFF_ID__";
+const API_URL = "/api";
+const SUBMIT_LABEL = `
+  <i class="fa-solid fa-paper-plane"></i>
+  <span>ส่งใบลาเพื่อขออนุมัติ</span>`;
+
+let idToken = "";
+let currentProfile = null;
+let submitting = false;
+
+/* ===================== DOM ===================== */
+
+const $ = (id) => document.getElementById(id);
+
+const loadingOverlay = $("loadingOverlay");
+const loadingText = $("loadingText");
+const loadingTime = $("loadingTime");
+const unregisteredBox = $("unregisteredBox");
+const leaveForm = $("leaveForm");
+const empNameDisplay = $("empNameDisplay");
+const empIdDisplay = $("empIdDisplay");
+const empCompanyDisplay = $("empCompanyDisplay");
+const empDeptDivDisplay = $("empDeptDivDisplay");
+const empPosDisplay = $("empPosDisplay");
+const employeeLineIdInput = $("employeeLineId");
+const employeeNameInput = $("employeeName");
+const departmentInput = $("department");
+const managerLineIdInput = $("managerLineId");
+const managerNoticeBox = $("managerNoticeBox");
+const otherDetailBox = $("otherDetailBox");
+const otherLeaveDetailInput = $("otherLeaveDetail");
+const startDateInput = $("startDate");
+const endDateInput = $("endDate");
+const totalDaysInput = $("totalDays");
+const reasonInput = $("reason");
+const submitBtn = $("submitBtn");
+
+/* ===================== UTIL ===================== */
+
+function escapeHtml(v) {
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function setLoading(text) {
+  loadingText.textContent = text || "กำลังโหลด...";
+}
+
+function hideLoading() {
+  loadingOverlay.classList.add("hidden");
+}
+
+function showError(title, message) {
+  loadingOverlay.classList.remove("hidden");
+
+  loadingOverlay.innerHTML = `
+    <div class="text-red-500">
+      <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
+      <p class="font-semibold text-sm">${escapeHtml(title)}</p>
+      <p class="text-xs text-gray-500 mt-2">${escapeHtml(message)}</p>
+    </div>`;
+}
+
+/* ===================== API (ผ่าน Cloudflare Worker /api) ===================== */
+
+async function callApi(fn, args = [], timeout = 20000) {
+  const started = performance.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    console.log("[API START]", fn);
+
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fn: fn, args: args }),
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    const text = await response.text();
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error("ระบบตอบกลับไม่ใช่ JSON (HTTP " + response.status + ")");
+    }
+
+    console.log("[API END]", fn, Math.round(performance.now() - started) + " ms");
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data && data.error ? data.error : "HTTP " + response.status);
+    }
+
+    return data.result;
+
+  } catch (error) {
+    console.error("[API ERROR]", fn, Math.round(performance.now() - started) + " ms", error);
+
+    if (error.name === "AbortError") {
+      throw new Error(fn + " ใช้เวลานานเกิน " + timeout / 1000 + " วินาที");
+    }
+    throw error;
+
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ===================== LIFF DIAGNOSTIC ===================== */
+
+function liffDiag() {
+  const d = {
+    sdkLoaded: typeof liff !== "undefined",
+    liffId: LIFF_ID,
+    href: window.location.href.slice(0, 200),
+    ua: navigator.userAgent.slice(0, 120)
+  };
+
+  if (typeof liff !== "undefined") {
+    try { d.inClient = liff.isInClient(); } catch (e) { d.inClient = "error"; }
+    try { d.os = liff.getOS(); } catch (e) {}
+    try { d.loggedIn = liff.isLoggedIn(); } catch (e) { d.loggedIn = "error"; }
+  }
+
+  return d;
+}
+
+function showLiffProblem(title, detail, showLogin = false) {
+  loadingOverlay.classList.remove("hidden");
+
+  loadingOverlay.innerHTML = `
+    <div class="text-red-500 text-left">
+      <p class="font-semibold text-sm text-center">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        ${escapeHtml(title)}
+      </p>
+      <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
+      ${showLogin ? `
+        <div class="text-center mt-3">
+          <button type="button" onclick="liff.login()"
+                  class="px-4 py-2 rounded-lg bg-green-500 text-white text-sm">
+            ลองเข้าสู่ระบบ LINE
+          </button>
+        </div>` : ""}
+      <pre class="text-[10px] text-gray-400 mt-3 whitespace-pre-wrap break-all bg-gray-50 p-2 rounded">${escapeHtml(JSON.stringify(liffDiag(), null, 2))}</pre>
+    </div>`;
+}
+
+/* ===================== INIT LIFF ===================== */
+
+async function initializeLiff() {
+  const started = performance.now();
+
+  try {
+    setLoading("กำลังเชื่อมต่อ LINE LIFF...");
+
+    if (typeof liff === "undefined") {
+      showLiffProblem("โหลด LIFF SDK ไม่สำเร็จ", "ไม่สามารถโหลด LINE LIFF SDK ได้");
+      return;
+    }
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("การเชื่อมต่อ LINE LIFF ใช้เวลานานเกินไป (เกิน 15 วินาที)")),
+        15000
+      )
+    );
+
+    await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
+
+    console.log("[LIFF] init =", Math.round(performance.now() - started), "ms");
+
+    if (!liff.isLoggedIn()) {
+      // Auto login on PC / external browser
+      liff.login({ redirectUri: window.location.href });
+      return;
+    }
+
+    setLoading("กำลังอ่านข้อมูลบัญชี LINE...");
+
+    idToken = liff.getIDToken() || "";
+
+    const profile = await liff.getProfile();
+
+    currentProfile = profile;
+    employeeLineIdInput.value = profile.userId;
+
+    console.log("[LIFF] getProfile =", Math.round(performance.now() - started), "ms");
+
+    setLoading("กำลังตรวจสอบข้อมูลพนักงาน...");
+
+    await checkEmployeeRegistration(profile.userId);
+
+    loadingTime.textContent = "ใช้เวลา " + Math.round(performance.now() - started) + " ms";
+
+  } catch (error) {
+    console.error("LIFF ERROR", error);
+    showLiffProblem("เกิดข้อผิดพลาดในการเชื่อมต่อ LINE LIFF", error.message, true);
+  }
+}
+
+/* ===================== CHECK EMPLOYEE ===================== */
+
+async function checkEmployeeRegistration(lineUserId) {
+  try {
+    const profile = await callApi("getEmployeeProfile", [lineUserId, idToken]);
+
+    if (profile && profile.isRegistered) {
+      renderEmployeeInfo(profile);
+      return;
+    }
+
+    hideLoading();
+    unregisteredBox.classList.remove("hidden");
+
+  } catch (error) {
+    console.error("CHECK EMPLOYEE ERROR", error);
+    showError("ไม่สามารถตรวจสอบข้อมูลพนักงานได้", error.message);
+  }
+}
+
+/* ===================== RENDER EMPLOYEE ===================== */
+
+function renderEmployeeInfo(profile) {
+  const displayName = (profile.title ? profile.title + ' ' : '') + (profile.fullName || '-');
+  empNameDisplay.textContent = displayName;
+  empIdDisplay.textContent = 'รหัส: ' + (profile.employeeId || '-');
+  empCompanyDisplay.textContent = profile.company || 'บริษัทในเครือ';
+  empDeptDivDisplay.textContent = [profile.division, profile.department].filter(Boolean).join(' / ') || '-';
+  empPosDisplay.textContent = profile.position || '-';
+
+  employeeLineIdInput.value = currentProfile ? currentProfile.userId : "";
+  employeeNameInput.value = profile.fullName || "";
+  departmentInput.value = profile.department || "";
+  managerLineIdInput.value = profile.managerLineId || "";
+
+  // ไม่มีหัวหน้า -> ระบบอนุมัติอัตโนมัติ
+  if (!profile.managerLineId) {
+    managerNoticeBox.innerHTML = `
+      <i class="fa-solid fa-circle-check mt-0.5 text-emerald-600"></i>
+      <div class="flex-1">คุณไม่มีหัวหน้าผู้อนุมัติ ระบบจะบันทึกและอนุมัติใบลาให้อัตโนมัติ</div>`;
+    managerNoticeBox.className =
+      "p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-800 flex items-start space-x-2";
+  }
+
+  hideLoading();
+  leaveForm.classList.remove("hidden");
+}
+
+/* ===================== LEAVE TYPE LISTENER ===================== */
+
+document.querySelectorAll('input[name="leaveType"]').forEach(function (radio) {
+  radio.addEventListener('change', function () {
+    if (this.value === 'อื่นๆ') {
+      otherDetailBox.classList.remove('hidden');
+      if (otherLeaveDetailInput) otherLeaveDetailInput.focus();
+    } else {
+      otherDetailBox.classList.add('hidden');
+    }
+  });
+});
+
+/* ===================== GO REGISTER ===================== */
+
+const goToRegisterBtn = $("goToRegisterBtn");
+if (goToRegisterBtn) {
+  goToRegisterBtn.addEventListener("click", function () {
+    const url = "https://liff.line.me/" + REGISTER_LIFF_ID;
+    try {
+      liff.openWindow({ url: url, external: false });
+    } catch (error) {
+      window.location.href = url;
+    }
+  });
+}
+
+/* ===================== DATE ===================== */
+
+function getTodayLocal() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    .toISOString()
+    .split("T")[0];
+}
+
+const today = getTodayLocal();
+
+startDateInput.value = today;
+endDateInput.value = today;
+
+function calculateDays() {
+  if (!startDateInput.value || !endDateInput.value) return;
+
+  const start = new Date(startDateInput.value);
+  const end = new Date(endDateInput.value);
+
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+
+  if (end < start) {
+    endDateInput.value = startDateInput.value;
+    totalDaysInput.value = "1";
+    return;
+  }
+
+  totalDaysInput.value =
+    Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+startDateInput.addEventListener("change", calculateDays);
+endDateInput.addEventListener("change", calculateDays);
+
+/* ===================== SUBMIT FORM ===================== */
+
+leaveForm.addEventListener("submit", async function (e) {
+  e.preventDefault();
+
+  if (submitting) return;
+
+  const selectedType = document.querySelector('input[name="leaveType"]:checked');
+  const leaveType = selectedType ? selectedType.value : "ลาป่วย";
+  const otherLeaveDetail = otherLeaveDetailInput ? otherLeaveDetailInput.value.trim() : "";
+
+  if (leaveType === "อื่นๆ" && !otherLeaveDetail) {
+    Swal.fire("กรุณาระบุรายละเอียด", "โปรดระบุประเภทการลาเพิ่มเติมสำหรับตัวเลือกอื่นๆ", "warning");
+    if (otherLeaveDetailInput) otherLeaveDetailInput.focus();
+    return;
+  }
+
+  const startDate = startDateInput.value;
+  const endDate = endDateInput.value;
+  const totalDays = parseFloat(totalDaysInput.value);
+  const reason = reasonInput.value.trim();
+
+  if (new Date(endDate) < new Date(startDate)) {
+    Swal.fire("วันที่ไม่ถูกต้อง", "วันที่สิ้นสุดต้องไม่มาก่อนวันที่เริ่มต้น", "warning");
+    return;
+  }
+
+  if (isNaN(totalDays) || totalDays <= 0) {
+    Swal.fire("จำนวนวันไม่ถูกต้อง", "กรุณาระบุจำนวนวันลามากกว่า 0", "warning");
+    return;
+  }
+
+  if (!reason) {
+    Swal.fire("กรุณาระบุเหตุผล", "โปรดระบุเหตุผลการลาให้ชัดเจน", "warning");
+    return;
+  }
+
+  const displayLeave = (leaveType === "อื่นๆ" && otherLeaveDetail) ? `อื่นๆ (${escapeHtml(otherLeaveDetail)})` : escapeHtml(leaveType);
+
+  const result = await Swal.fire({
+    title: "ยืนยันการยื่นใบลา?",
+    html: `
+      <div class="text-left text-xs space-y-1.5 p-3 bg-gray-50 rounded-lg">
+        <p><strong>ประเภท:</strong> ${displayLeave}</p>
+        <p><strong>ช่วงวันที่ลาใช้สิทธิ:</strong> ${escapeHtml(startDate)} ถึง ${escapeHtml(endDate)} (${escapeHtml(totalDays)} วัน)</p>
+        <p><strong>เหตุผล:</strong> ${escapeHtml(reason)}</p>
+      </div>`,
+    icon: "question",
+    showCancelButton: true,
+    confirmButtonColor: "#2563EB",
+    cancelButtonColor: "#9CA3AF",
+    confirmButtonText: "ยืนยันยื่นใบลา",
+    cancelButtonText: "ยกเลิก"
+  });
+
+  if (!result.isConfirmed) return;
+
+  executeSubmit({
+    employeeLineId: employeeLineIdInput.value,
+    leaveType: leaveType,
+    otherLeaveDetail: otherLeaveDetail,
+    startDate: startDate,
+    endDate: endDate,
+    totalDays: totalDays,
+    reason: reason,
+    idToken: idToken
+  });
+});
+
+/* ===================== SUBMIT API ===================== */
+
+async function executeSubmit(payload) {
+  if (submitting) return;
+
+  submitting = true;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = `
+    <i class="fa-solid fa-spinner animate-spin"></i>
+    <span>กำลังส่งคำขอ...</span>`;
+
+  try {
+    const result = await callApi("submitLeaveRequest", [payload], 30000);
+    handleSubmitSuccess(result);
+  } catch (error) {
+    handleSubmitError(error);
+  }
+}
+
+function resetSubmitButton() {
+  submitting = false;
+  submitBtn.disabled = false;
+  submitBtn.innerHTML = SUBMIT_LABEL;
+}
+
+function handleSubmitSuccess(res) {
+  if (res && res.success) {
+
+    submitBtn.innerHTML = `
+      <i class="fa-solid fa-circle-check"></i>
+      <span>ส่งใบลาเรียบร้อยแล้ว</span>`;
+
+    const isWarn = !!res.warning;
+
+    const title = isWarn
+      ? "บันทึกแล้ว แต่ยังแจ้งหัวหน้าไม่สำเร็จ"
+      : (res.autoApproved ? "บันทึกและอนุมัติอัตโนมัติ" : "ยื่นใบลาสำเร็จ!");
+
+    Swal.fire({
+      icon: isWarn ? "warning" : "success",
+      title: title,
+      html: `
+        <p class="text-sm text-gray-600 mb-2">
+          รหัสคำขอ:
+          <span class="font-bold text-blue-600">${escapeHtml(res.requestId || "-")}</span>
+        </p>
+        <p class="text-xs text-gray-500">${escapeHtml(res.message || "")}</p>`,
+      confirmButtonColor: "#2563EB",
+      confirmButtonText: "เรียบร้อย",
+      timer: isWarn ? undefined : 3000,
+      timerProgressBar: !isWarn
+    }).then(() => {
+      try {
+        if (liff.isInClient()) liff.closeWindow();
+      } catch (e) {}
+    });
+
+  } else {
+    resetSubmitButton();
+
+    Swal.fire(
+      "ไม่สำเร็จ",
+      res && res.message ? res.message : "เกิดข้อผิดพลาดในการยื่นใบลา",
+      "error"
+    );
+  }
+}
+
+function handleSubmitError(error) {
+  resetSubmitButton();
+  console.error("SUBMIT ERROR", error);
+
+  Swal.fire(
+    "เกิดข้อผิดพลาด",
+    error && error.message
+      ? error.message
+      : "ไม่สามารถส่งคำขอได้ กรุณาลองใหม่อีกครั้ง",
+    "error"
+  );
+}
+
+/* ===================== START ===================== */
+
+window.addEventListener("DOMContentLoaded", initializeLiff);
+  </script>
+
+</body>
+
+</html>

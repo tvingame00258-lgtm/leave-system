@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ลงทะเบียนพนักงาน</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+  <style>
+    body {
+      font-family: 'Prompt', sans-serif;
+      background-color: #F3F4F6;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col justify-between py-6 px-4 sm:px-6">
+
+  <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
+
+    <!-- HEADER -->
+    <div class="bg-gradient-to-r from-blue-700 to-indigo-800 px-6 py-6 text-white text-center">
+      <div
+        class="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i class="fa-solid fa-id-card text-2xl text-white"></i>
+      </div>
+      <h1 class="text-xl font-bold tracking-wide">ลงทะเบียนพนักงาน</h1>
+      <p class="text-xs text-blue-200 mt-1">เข้าสู่ระบบยื่นใบลาและอนุมัติผ่าน LINE</p>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loadingOverlay" class="p-8 text-center">
+      <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent mb-3">
+      </div>
+      <p id="loadingText" class="text-sm text-gray-500 font-medium">กำลังเชื่อมต่อ LINE LIFF...</p>
+      <p id="loadingTime" class="text-[10px] text-gray-400 mt-2"></p>
+    </div>
+
+    <!-- FORM -->
+    <form id="registerForm" class="p-6 space-y-4 hidden">
+
+      <!-- LINE PROFILE -->
+      <div class="flex items-center space-x-3 p-3 bg-blue-50/70 rounded-xl border border-blue-100">
+        <img id="userPicture"
+             src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60'%3E%3Crect width='60' height='60' fill='%23CBD5E1'/%3E%3Ccircle cx='30' cy='23' r='11' fill='%23fff'/%3E%3Cellipse cx='30' cy='54' rx='20' ry='15' fill='%23fff'/%3E%3C/svg%3E"
+             alt="Avatar"
+             class="w-12 h-12 rounded-full border-2 border-white shadow-sm object-cover">
+        <div class="flex-1 min-w-0">
+          <p class="text-xs text-gray-500 font-medium">บัญชี LINE ที่เชื่อมต่อ</p>
+          <p id="userNameDisplay" class="text-sm font-semibold text-gray-800 truncate">กำลังโหลด...</p>
+          <p id="userIdDisplay" class="text-[10px] text-gray-400 font-mono truncate">ID: -</p>
+        </div>
+      </div>
+
+      <input type="hidden" id="lineUserId">
+
+      <!-- COMPANY -->
+      <div>
+        <label for="company" class="block text-xs font-semibold text-gray-700 mb-1">
+          บริษัทในเครือ <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-building text-xs"></i>
+          </div>
+          <select id="company" required
+                  class="w-full pl-9 pr-8 py-2.5 text-xs sm:text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none bg-white">
+            <option value="" disabled selected>เลือกบริษัทของคุณ</option>
+            <option value="บริษัท ฟินน์ลูชั่น จำกัด">บริษัท ฟินน์ลูชั่น จำกัด</option>
+            <option value="บริษัท ฟินน์เจนติก จำกัด">บริษัท ฟินน์เจนติก จำกัด</option>
+            <option value="บริษัท สบายโก จำกัด">บริษัท สบายโก จำกัด</option>
+            <option value="บริษัท เทวาพาวเวอร์ จํากัด">บริษัท เทวาพาวเวอร์ จํากัด</option>
+            <option value="บริษัท เบเนฟินน์ จํากัด">บริษัท เบเนฟินน์ จํากัด</option>
+            <option value="บริษัท อินฟินิท ซัคเซส คอนซัลติ้ง จำกัด">บริษัท อินฟินิท ซัคเซส คอนซัลติ้ง จำกัด</option>
+          </select>
+          <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-chevron-down text-xs"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- EMPLOYEE ID (ตัวเลขเท่านั้น) -->
+      <div>
+        <label for="employeeId" class="block text-xs font-semibold text-gray-700 mb-1">
+          รหัสพนักงาน <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-barcode text-xs"></i>
+          </div>
+          <input type="text" id="employeeId" required inputmode="numeric" pattern="[0-9]+" autocomplete="off"
+                 placeholder="กรอกรหัสพนักงานเป็นตัวเลขเท่านั้น"
+                 class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono">
+        </div>
+      </div>
+
+      <!-- TITLE & FULL NAME (GRID) -->
+      <div class="grid grid-cols-3 gap-2">
+        <div class="col-span-1">
+          <label for="title" class="block text-xs font-semibold text-gray-700 mb-1">
+            คำนำหน้า <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <select id="title" required
+                    class="w-full px-2.5 py-2.5 text-xs sm:text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none bg-white">
+              <option value="" disabled selected>เลือก</option>
+              <option value="นาย">นาย</option>
+              <option value="นาง">นาง</option>
+              <option value="นางสาว">นางสาว</option>
+              <option value="อื่นๆ">อื่นๆ</option>
+            </select>
+            <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none text-gray-400">
+              <i class="fa-solid fa-chevron-down text-[10px]"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-span-2">
+          <label for="fullName" class="block text-xs font-semibold text-gray-700 mb-1">
+            ชื่อ-นามสกุล <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+              <i class="fa-solid fa-user text-xs"></i>
+            </div>
+            <input type="text" id="fullName" required placeholder="สมชาย ใจดี"
+                   class="w-full pl-8 pr-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+          </div>
+        </div>
+      </div>
+
+      <!-- DIVISION (ซ้าย) & DEPARTMENT (ขวา) -->
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label for="division" class="block text-xs font-semibold text-gray-700 mb-1">
+            ฝ่าย <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+              <i class="fa-solid fa-sitemap text-xs"></i>
+            </div>
+            <select id="division" required class="w-full pl-8 pr-3 py-2.5 text-xs sm:text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"><option value="" disabled selected>เลือกฝ่าย</option><option value="Support">Support</option><option value="Operate">Operate</option><option value="Management">ผู้บริหาร</option></select>
+          </div>
+        </div>
+
+        <div>
+          <label for="department" class="block text-xs font-semibold text-gray-700 mb-1">
+            แผนก <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+              <i class="fa-solid fa-layer-group text-xs"></i>
+            </div>
+            <select id="department" required class="w-full pl-8 pr-3 py-2.5 text-xs sm:text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"><option value="" disabled selected>เลือกแผนก/ทีม</option></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- POSITION -->
+      <div>
+        <label for="position" class="block text-xs font-semibold text-gray-700 mb-1">
+          ตำแหน่งงาน <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-briefcase text-xs"></i>
+          </div>
+          <select id="position" required class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"><option value="" disabled selected>เลือกบทบาท</option><option value="EMPLOYEE">พนักงาน</option><option value="MANAGER">Manager</option></select>
+        </div>
+      </div>
+
+      <!-- MANAGER -->
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <label for="managerLineId" class="block text-xs font-semibold text-gray-700">
+            หัวหน้าผู้อนุมัติของคุณ <span class="text-red-500">*</span>
+          </label>
+          <button id="refreshMgrBtn" type="button" class="text-[11px] text-blue-600 hover:underline">
+            <i class="fa-solid fa-rotate-right"></i> รีเฟรชรายชื่อ
+          </button>
+        </div>
+        <div class="relative">
+          <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-user-tie text-xs"></i>
+          </div>
+          <select id="managerLineId" required
+                  class="w-full pl-9 pr-8 py-2.5 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none bg-white">
+            <option value="" disabled selected>กำลังโหลดรายชื่อหัวหน้า...</option>
+          </select>
+          <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-400">
+            <i class="fa-solid fa-chevron-down text-xs"></i>
+          </div>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-1">
+          * เมื่อคุณยื่นใบลา ระบบจะส่งข้อความขออนุมัติไปยังหัวหน้าคนนี้
+        </p>
+      </div>
+
+      <!-- SUBMIT -->
+      <div class="pt-2">
+        <button type="submit" id="submitBtn"
+                class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-blue-500/30 transition-all transform active:scale-[0.98] flex items-center justify-center space-x-2">
+          <i class="fa-solid fa-circle-check"></i>
+          <span>บันทึกข้อมูลการลงทะเบียน</span>
+        </button>
+      </div>
+
+    </form>
+  </div>
+
+  <div class="text-center text-xs text-gray-400 mt-6">
+    ระบบลาและอนุมัติงาน &bull; ขับเคลื่อนด้วย Google Sheets &amp; LINE LIFF
+  </div>
+
+  <script>
+    /* ===================== CONFIG ===================== */
+
+const LIFF_ID = "__LIFF_ID__";
+const API_URL = "/api";
+const SUBMIT_LABEL = `
+  <i class="fa-solid fa-circle-check"></i>
+  <span>บันทึกข้อมูลการลงทะเบียน</span>`;
+
+let idToken = "";
+let currentUserId = "";
+let submitting = false;
+let bootstrapMode = false;
+let cachedManagers = [];
+
+/* ===================== DOM ===================== */
+
+const $ = (id) => document.getElementById(id);
+
+const loadingOverlay = $("loadingOverlay");
+const loadingText = $("loadingText");
+const loadingTime = $("loadingTime");
+const registerForm = $("registerForm");
+const userPicture = $("userPicture");
+const userNameDisplay = $("userNameDisplay");
+const userIdDisplay = $("userIdDisplay");
+const lineUserIdInput = $("lineUserId");
+const companySelect = $("company");
+const employeeIdInput = $("employeeId");
+
+// รหัสพนักงาน: ตัวเลขเท่านั้น (แปลงเลขไทย ๐-๙ เป็นเลขอารบิก แล้วตัดอักขระอื่นทิ้ง)
+employeeIdInput.addEventListener("input", function () {
+  this.value = this.value
+    .replace(/[๐-๙]/g, function (d) { return "๐๑๒๓๔๕๖๗๘๙".indexOf(d); })
+    .replace(/[^0-9]/g, "");
+});
+
+const titleSelect = $("title");
+const fullNameInput = $("fullName");
+const divisionInput = $("division");
+const departmentInput = $("department");
+const positionInput = $("position");
+const managerSelect = $("managerLineId");
+const refreshMgrBtn = $("refreshMgrBtn");
+const submitBtn = $("submitBtn");
+
+/* ===================== UTIL ===================== */
+
+function escapeHtml(v) {
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function setLoading(text) {
+  loadingText.textContent = text || "กำลังโหลด...";
+}
+
+function hideLoading() {
+  loadingOverlay.classList.add("hidden");
+}
+
+/* ===================== API (ผ่าน Cloudflare Worker /api) ===================== */
+
+async function callApi(fn, args = [], timeout = 20000) {
+  const started = performance.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    console.log("[API START]", fn);
+
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fn: fn, args: args }),
+      cache: "no-store",
+      signal: controller.signal
+    });
+
+    const text = await response.text();
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error("ระบบตอบกลับไม่ใช่ JSON (HTTP " + response.status + ")");
+    }
+
+    console.log("[API END]", fn, Math.round(performance.now() - started) + " ms");
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data && data.error ? data.error : "HTTP " + response.status);
+    }
+
+    return data.result;
+
+  } catch (error) {
+    console.error("[API ERROR]", fn, error);
+
+    if (error.name === "AbortError") {
+      throw new Error(fn + " ใช้เวลานานเกิน " + timeout / 1000 + " วินาที");
+    }
+    throw error;
+
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ===================== LIFF DIAGNOSTIC ===================== */
+
+function liffDiag() {
+  const d = {
+    sdkLoaded: typeof liff !== "undefined",
+    liffId: LIFF_ID,
+    href: window.location.href.slice(0, 200),
+    ua: navigator.userAgent.slice(0, 120)
+  };
+
+  if (typeof liff !== "undefined") {
+    try { d.inClient = liff.isInClient(); } catch (e) {}
+    try { d.os = liff.getOS(); } catch (e) {}
+    try { d.loggedIn = liff.isLoggedIn(); } catch (e) {}
+  }
+
+  return d;
+}
+
+function showLiffProblem(title, detail, login = false) {
+  loadingOverlay.classList.remove("hidden");
+
+  loadingOverlay.innerHTML = `
+    <div class="text-red-500 text-left">
+      <p class="font-semibold text-sm text-center">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        ${escapeHtml(title)}
+      </p>
+      <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
+      ${login ? `
+        <div class="text-center mt-3">
+          <button type="button" onclick="liff.login()"
+                  class="px-4 py-2 rounded-lg bg-green-500 text-white text-sm">
+            ลองเข้าสู่ระบบ LINE
+          </button>
+        </div>` : ""}
+      <pre class="text-[10px] text-gray-400 mt-3 whitespace-pre-wrap break-all bg-gray-50 p-2 rounded">${escapeHtml(JSON.stringify(liffDiag(), null, 2))}</pre>
+    </div>`;
+}
+
+/* ===================== INIT LIFF ===================== */
+
+async function initializeLiff() {
+  const started = performance.now();
+
+  try {
+    setLoading("กำลังเชื่อมต่อ LINE LIFF...");
+
+    if (typeof liff === "undefined") {
+      showLiffProblem("โหลด LIFF SDK ไม่สำเร็จ", "ไม่สามารถโหลด LINE LIFF SDK ได้");
+      return;
+    }
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("การเชื่อมต่อ LINE LIFF ใช้เวลานานเกินไป (เกิน 15 วินาที)")),
+        15000
+      )
+    );
+
+    await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
+
+    console.log("[LIFF INIT]", Math.round(performance.now() - started), "ms");
+
+    if (!liff.isLoggedIn()) {
+      // Auto login on PC / external browser
+      liff.login({ redirectUri: window.location.href });
+      return;
+    }
+
+    idToken = liff.getIDToken() || "";
+
+    setLoading("กำลังอ่านข้อมูลบัญชี LINE...");
+
+    const profile = await liff.getProfile();
+
+    currentUserId = profile.userId;
+    lineUserIdInput.value = profile.userId;
+    userNameDisplay.textContent = profile.displayName || "LINE User";
+    userIdDisplay.textContent = "ID: " + profile.userId;
+
+    if (profile.pictureUrl) userPicture.src = profile.pictureUrl;
+
+    console.log("[PROFILE]", Math.round(performance.now() - started), "ms");
+
+    setLoading("กำลังโหลดข้อมูลพนักงานและรายชื่อหัวหน้า...");
+
+    await loadPageData();
+
+    loadingTime.textContent =
+      "โหลดเสร็จใน " + Math.round(performance.now() - started) + " ms";
+
+  } catch (error) {
+    console.error("LIFF ERROR", error);
+    showLiffProblem("เกิดข้อผิดพลาดในการเชื่อมต่อ LINE LIFF", error.message, true);
+  }
+}
+
+/* ===================== LOAD PAGE DATA ===================== */
+
+async function loadPageData() {
+  // Profile และรายชื่อหัวหน้ามาจาก request เดียว พร้อม verify ID Token ครั้งเดียว
+  const pageData = await callApi("getRegisterPageData", [currentUserId, idToken]);
+
+  const profile = pageData && pageData.profile;
+  const managers = pageData && Array.isArray(pageData.managers) ? pageData.managers : [];
+  bootstrapMode = !!(pageData && pageData.bootstrapMode);
+  cachedManagers = managers;
+
+  // เติมข้อมูลเดิม
+  if (profile && profile.isRegistered) {
+    if (profile.company) companySelect.value = profile.company;
+    employeeIdInput.value = String(profile.employeeId || "").replace(/[^0-9]/g, "");
+    if (profile.title) titleSelect.value = profile.title;
+    fullNameInput.value = profile.fullName || "";
+    divisionInput.value = profile.division || "";
+    updateDepartmentOptions(profile.department || "");
+    positionInput.value = profile.approvalRole || (profile.position === "Manager" ? "MANAGER" : profile.position ? "EMPLOYEE" : "");
+
+    managerSelect.setAttribute(
+      "data-saved-manager",
+      profile.managerLineId || "TOP_MANAGEMENT"
+    );
+  }
+
+  if (!departmentInput.value) updateDepartmentOptions("");
+  renderManagers(managers);
+
+  hideLoading();
+  registerForm.classList.remove("hidden");
+}
+
+function updateDepartmentOptions(selectedValue) {
+  const optionsByDivision = {
+    Support: ["HR", "บัญชี", "กฎหมาย", "ธุรการกฎหมาย", "IT"],
+    Operate: ["ระบบติดตามหนี้"],
+    Management: ["ผู้จัดการทั่วไป"]
+  };
+  const departments = optionsByDivision[divisionInput.value] || [];
+  const managerOption = Array.from(positionInput.options).find(option => option.value === "MANAGER");
+  if (managerOption) {
+    managerOption.textContent = divisionInput.value === "Support" ? "หัวหน้าแผนก"
+      : divisionInput.value === "Management" ? "ผู้จัดการทั่วไป" : "Manager";
+  }
+  departmentInput.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "เลือกแผนก/ทีม";
+  placeholder.disabled = true;
+  placeholder.selected = !selectedValue;
+  departmentInput.appendChild(placeholder);
+  departments.forEach(function (name) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    departmentInput.appendChild(option);
+  });
+  if (departments.includes(selectedValue)) departmentInput.value = selectedValue;
+}
+
+/* ===================== RENDER MANAGER ===================== */
+
+function filterEligibleManagers(managers) {
+  const isGeneralManager = function (manager) {
+    return manager.division === "Management" && manager.department === "ผู้จัดการทั่วไป";
+  };
+  return (managers || []).filter(function (manager) {
+    if (!manager || manager.approvalRole !== "MANAGER") return false;
+    if (positionInput.value === "MANAGER") return isGeneralManager(manager);
+    if (divisionInput.value === "Operate") {
+      return manager.division === "Operate" && manager.company === companySelect.value;
+    }
+    if (divisionInput.value === "Support") {
+      if (departmentInput.value === "IT") {
+        return isGeneralManager(manager) || (manager.division === "Operate" && manager.company === companySelect.value);
+      }
+      return manager.division === "Support" && manager.department === departmentInput.value;
+    }
+    return false;
+  });
+}
+
+function renderManagers(managers) {
+  const savedManager = managerSelect.getAttribute("data-saved-manager");
+
+  managerSelect.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "-- กรุณาเลือกหัวหน้าผู้อนุมัติ --";
+  defaultOption.disabled = true;
+  defaultOption.selected = !savedManager;
+  managerSelect.appendChild(defaultOption);
+
+  const mayBootstrapWithoutManager = bootstrapMode && positionInput.value === "MANAGER";
+  managerSelect.required = true;
+  if (mayBootstrapWithoutManager) {
+    const topOption = document.createElement("option");
+    topOption.value = "TOP_MANAGEMENT";
+    topOption.textContent = "ไม่มีหัวหน้า (ชั่วคราวระหว่างตั้งค่าระบบ)";
+    topOption.selected = savedManager === "TOP_MANAGEMENT";
+    managerSelect.appendChild(topOption);
+  }
+
+  const eligibleManagers = filterEligibleManagers(managers);
+  if (Array.isArray(eligibleManagers)) {
+    eligibleManagers.forEach(function (mgr) {
+      if (!mgr || !mgr.lineUserId || mgr.lineUserId === currentUserId) return;
+
+      const option = document.createElement("option");
+      option.value = mgr.lineUserId;
+
+      const position = mgr.position ? " (" + mgr.position + ")" : "";
+
+      option.textContent =
+        (mgr.fullName || "-") + position + " - " + (mgr.department || "ไม่ระบุแผนก");
+
+      if (savedManager && savedManager === mgr.lineUserId) {
+        option.selected = true;
+        defaultOption.selected = false;
+      }
+
+      managerSelect.appendChild(option);
+    });
+  }
+
+  if (savedManager === "TOP_MANAGEMENT" && mayBootstrapWithoutManager) {
+    const topOption = Array.from(managerSelect.options).find(option => option.value === "TOP_MANAGEMENT");
+    if (topOption) { topOption.selected = true; defaultOption.selected = false; }
+  }
+}
+
+divisionInput.addEventListener("change", function () { updateDepartmentOptions(""); renderManagers(cachedManagers); });
+departmentInput.addEventListener("change", function () { renderManagers(cachedManagers); });
+positionInput.addEventListener("change", function () { renderManagers(cachedManagers); });
+companySelect.addEventListener("change", function () { renderManagers(cachedManagers); });
+
+/* ===================== REFRESH MANAGER ===================== */
+
+refreshMgrBtn.addEventListener("click", async function () {
+  if (refreshMgrBtn.disabled) return;
+
+  refreshMgrBtn.disabled = true;
+  refreshMgrBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> กำลังโหลด...`;
+
+  try {
+    const pageData = await callApi("getRegisterPageData", [currentUserId, idToken], 20000);
+    const managers = pageData && Array.isArray(pageData.managers) ? pageData.managers : [];
+    bootstrapMode = !!(pageData && pageData.bootstrapMode);
+    cachedManagers = managers;
+
+    renderManagers(managers);
+
+    Swal.fire({
+      toast: true,
+      position: "top-end",
+      icon: "success",
+      title: "อัปเดตรายชื่อแล้ว",
+      showConfirmButton: false,
+      timer: 1200
+    });
+
+  } catch (error) {
+    console.error("REFRESH MANAGER ERROR", error);
+    Swal.fire("ไม่สามารถโหลดรายชื่อได้", error.message, "error");
+
+  } finally {
+    refreshMgrBtn.disabled = false;
+    refreshMgrBtn.innerHTML = `<i class="fa-solid fa-rotate-right"></i> รีเฟรชรายชื่อ`;
+  }
+});
+
+/* ===================== SUBMIT REGISTER ===================== */
+
+registerForm.addEventListener("submit", async function (e) {
+  e.preventDefault();
+
+  if (submitting) return;
+
+  const lineUserId = lineUserIdInput.value;
+  const company = companySelect.value;
+  const employeeId = employeeIdInput.value.trim();
+  const title = titleSelect.value;
+  const fullName = fullNameInput.value.trim();
+  const division = divisionInput.value.trim();
+  const department = departmentInput.value.trim();
+  const position = positionInput.value.trim();
+  let managerLineId = managerSelect.value;
+
+  if (!/^[0-9]+$/.test(employeeId)) {
+    Swal.fire("รหัสพนักงานไม่ถูกต้อง", "กรุณากรอกรหัสพนักงานเป็นตัวเลขเท่านั้น", "warning");
+    employeeIdInput.focus();
+    return;
+  }
+
+  if (!lineUserId) {
+    Swal.fire("แจ้งเตือน", "ไม่พบ LINE User ID กรุณาเข้าใช้งานผ่าน LINE", "warning");
+    return;
+  }
+
+  if (!company || !employeeId || !title || !fullName || !division || !department || !position || !managerLineId) {
+    Swal.fire(
+      "กรุณากรอกข้อมูลให้ครบถ้วน",
+      "โปรดระบุ บริษัท, รหัสพนักงาน, คำนำหน้า, ชื่อ-สกุล, ฝ่าย, แผนก, ตำแหน่ง และหัวหน้าผู้อนุมัติ",
+      "warning"
+    );
+    return;
+  }
+
+  if (managerLineId === "TOP_MANAGEMENT") managerLineId = "";
+
+  const payload = {
+    lineUserId: lineUserId,
+    company: company,
+    employeeId: employeeId,
+    title: title,
+    fullName: fullName,
+    division: division,
+    department: department,
+    position: position,
+    managerLineId: managerLineId,
+    approvalRole: positionInput.value,
+    idToken: idToken
+  };
+
+  const confirm = await Swal.fire({
+    title: "ยืนยันข้อมูลลงทะเบียน?",
+    html: `
+      <div class="text-left text-xs bg-gray-50 p-3 rounded-lg space-y-1">
+        <p><strong>บริษัท:</strong> ${escapeHtml(company)}</p>
+        <p><strong>รหัสพนักงาน:</strong> ${escapeHtml(employeeId)}</p>
+        <p><strong>ชื่อ-สกุล:</strong> ${escapeHtml(title)} ${escapeHtml(fullName)}</p>
+        <p><strong>ฝ่าย:</strong> ${escapeHtml(division)}</p>
+        <p><strong>แผนก:</strong> ${escapeHtml(department)}</p>
+        <p><strong>ตำแหน่ง:</strong> ${escapeHtml(position)}</p>
+      </div>`,
+    icon: "question",
+    showCancelButton: true,
+    confirmButtonColor: "#2563EB",
+    confirmButtonText: "บันทึก",
+    cancelButtonText: "ยกเลิก"
+  });
+
+  if (!confirm.isConfirmed) return;
+
+  await executeRegister(payload);
+});
+
+/* ===================== REGISTER API ===================== */
+
+async function executeRegister(payload) {
+  submitting = true;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = `
+    <i class="fa-solid fa-spinner animate-spin"></i>
+    <span>กำลังบันทึกข้อมูล...</span>`;
+
+  try {
+    const result = await callApi("registerEmployee", [payload], 30000);
+    handleSuccess(result);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+function resetSubmitButton() {
+  submitting = false;
+  submitBtn.disabled = false;
+  submitBtn.innerHTML = SUBMIT_LABEL;
+}
+
+function handleSuccess(res) {
+  if (res && res.success) {
+
+    submitBtn.innerHTML = `
+      <i class="fa-solid fa-circle-check"></i>
+      <span>บันทึกเรียบร้อยแล้ว</span>`;
+
+    Swal.fire({
+      icon: "success",
+      title: "สำเร็จ!",
+      text: res.message || "บันทึกข้อมูลพนักงานเรียบร้อยแล้ว",
+      confirmButtonColor: "#2563EB",
+      confirmButtonText: "ตกลง",
+      timer: 2000,
+      timerProgressBar: true
+    }).then(function () {
+      try {
+        if (liff.isInClient()) liff.closeWindow();
+      } catch (e) {}
+    });
+
+  } else {
+    resetSubmitButton();
+
+    Swal.fire(
+      "ไม่สำเร็จ",
+      res && res.message ? res.message : "เกิดข้อผิดพลาดในการบันทึก",
+      "error"
+    );
+  }
+}
+
+function handleError(error) {
+  resetSubmitButton();
+  console.error("REGISTER ERROR", error);
+
+  Swal.fire(
+    "เกิดข้อผิดพลาด",
+    error && error.message ? error.message : "ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้",
+    "error"
+  );
+}
+
+/* ===================== START ===================== */
+
+window.addEventListener("DOMContentLoaded", initializeLiff);
+  </script>
+
+</body>
+
+</html>
