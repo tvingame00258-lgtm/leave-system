@@ -27,6 +27,19 @@
 
   <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
 
+    <!-- NAV BAR -->
+    <div id="navBar" class="hidden bg-white border-b border-gray-100 px-4 py-2 flex items-center justify-between">
+      <a href="/" class="inline-flex items-center text-xs font-medium text-gray-600 hover:text-blue-600 transition gap-1.5 py-1 px-2 rounded-lg hover:bg-gray-50">
+        <i class="fa-solid fa-house-chimney text-sm"></i>
+        <span>หน้าแรก</span>
+      </a>
+      <button type="button" id="logoutBtn"
+              class="inline-flex items-center text-xs font-medium text-gray-500 hover:text-red-600 transition gap-1.5 py-1 px-2 rounded-lg hover:bg-red-50">
+        <i class="fa-solid fa-right-from-bracket text-sm"></i>
+        <span>ออกจากระบบ</span>
+      </button>
+    </div>
+
     <!-- HEADER -->
     <div class="bg-gradient-to-r from-blue-700 to-indigo-800 px-6 py-6 text-white text-center">
       <div
@@ -355,6 +368,7 @@ function liffDiag() {
 
 function showLiffProblem(title, detail, login = false) {
   loadingOverlay.classList.remove("hidden");
+  const cleanRedirectUri = window.location.origin + window.location.pathname;
 
   loadingOverlay.innerHTML = `
     <div class="text-red-500 text-left">
@@ -365,9 +379,9 @@ function showLiffProblem(title, detail, login = false) {
       <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
       ${login ? `
         <div class="text-center mt-3">
-          <button type="button" onclick="liff.login()"
-                  class="px-4 py-2 rounded-lg bg-green-500 text-white text-sm">
-            ลองเข้าสู่ระบบ LINE
+          <button type="button" onclick="try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
+                  class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow">
+            <i class="fa-solid fa-arrow-rotate-right mr-1"></i> เข้าสู่ระบบ LINE ใหม่อีกครั้ง
           </button>
         </div>` : ""}
       <pre class="text-[10px] text-gray-400 mt-3 whitespace-pre-wrap break-all bg-gray-50 p-2 rounded">${escapeHtml(JSON.stringify(liffDiag(), null, 2))}</pre>
@@ -378,6 +392,7 @@ function showLiffProblem(title, detail, login = false) {
 
 async function initializeLiff() {
   const started = performance.now();
+  const cleanRedirectUri = window.location.origin + window.location.pathname;
 
   try {
     setLoading("กำลังเชื่อมต่อ LINE LIFF...");
@@ -396,19 +411,61 @@ async function initializeLiff() {
 
     await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
 
+    // Clean URL query params if returning from LINE Login (removes ?code=...&state=...)
+    if (window.location.search && (window.location.search.includes("code=") || window.location.search.includes("state="))) {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {}
+    }
+
     console.log("[LIFF INIT]", Math.round(performance.now() - started), "ms");
+
+    // Show nav bar on PC after LIFF is initialized
+    try {
+      if (!liff.isInClient()) {
+        var nav = document.getElementById("navBar");
+        if (nav) nav.classList.remove("hidden");
+      }
+    } catch (e) {}
 
     if (!liff.isLoggedIn()) {
       // Auto login on PC / external browser
-      liff.login({ redirectUri: window.location.href });
+      liff.login({ redirectUri: cleanRedirectUri });
       return;
     }
 
     idToken = liff.getIDToken() || "";
 
+    // In external browsers (PC), tokens expire after 1 hour.
+    // If idToken is missing or expired, force refresh by logging in again.
+    let isExpired = !idToken;
+    try {
+      const decoded = (typeof liff.getDecodedIDToken === "function") ? liff.getDecodedIDToken() : null;
+      if (decoded && decoded.exp && (Date.now() >= (decoded.exp * 1000 - 30000))) {
+        isExpired = true;
+      }
+    } catch (e) {
+      isExpired = true;
+    }
+
+    if (isExpired && !liff.isInClient()) {
+      console.warn("User ID token expired or missing on PC, refreshing session...");
+      try { liff.logout(); } catch (e) {}
+      liff.login({ redirectUri: cleanRedirectUri });
+      return;
+    }
+
     setLoading("กำลังอ่านข้อมูลบัญชี LINE...");
 
-    const profile = await liff.getProfile();
+    let profile;
+    try {
+      profile = await liff.getProfile();
+    } catch (profErr) {
+      console.warn("Could not getProfile (session possibly stale), resetting...", profErr);
+      try { liff.logout(); } catch (e) {}
+      liff.login({ redirectUri: cleanRedirectUri });
+      return;
+    }
 
     currentUserId = profile.userId;
     lineUserIdInput.value = profile.userId;
@@ -421,7 +478,17 @@ async function initializeLiff() {
 
     setLoading("กำลังโหลดข้อมูลพนักงานและรายชื่อหัวหน้า...");
 
-    await loadPageData();
+    try {
+      await loadPageData();
+    } catch (pageErr) {
+      if (pageErr.message && (pageErr.message.includes("LINE authentication required") || pageErr.message.includes("401"))) {
+        console.warn("ID Token expired or invalid on backend, re-authenticating...", pageErr);
+        try { liff.logout(); } catch (e) {}
+        liff.login({ redirectUri: cleanRedirectUri });
+        return;
+      }
+      throw pageErr;
+    }
 
     loadingTime.textContent =
       "โหลดเสร็จใน " + Math.round(performance.now() - started) + " ms";
@@ -722,7 +789,11 @@ function handleSuccess(res) {
       timerProgressBar: true
     }).then(function () {
       try {
-        if (liff.isInClient()) liff.closeWindow();
+        if (liff.isInClient()) {
+          liff.closeWindow();
+        } else {
+          window.location.href = "/";
+        }
       } catch (e) {}
     });
 
@@ -751,6 +822,33 @@ function handleError(error) {
 /* ===================== START ===================== */
 
 window.addEventListener("DOMContentLoaded", initializeLiff);
+
+/* ===================== NAV BAR (PC) ===================== */
+
+(function setupNavBar() {
+  try {
+    var nav = document.getElementById("navBar");
+    var btn = document.getElementById("logoutBtn");
+    if (!nav || !btn) return;
+
+    // Show nav bar only on external browser (PC)
+    function showNavIfPC() {
+      try {
+        if (typeof liff !== "undefined" && typeof liff.isInClient === "function" && !liff.isInClient()) {
+          nav.classList.remove("hidden");
+        }
+      } catch (e) {}
+    }
+
+    showNavIfPC();
+    window.addEventListener("load", function() { setTimeout(showNavIfPC, 500); });
+
+    btn.addEventListener("click", function () {
+      try { liff.logout(); } catch (e) {}
+      window.location.href = "/";
+    });
+  } catch (e) {}
+})();
   </script>
 
 </body>

@@ -487,21 +487,38 @@ function getConfiguredLineIds(env, name) {
 }
 async function getVerifiedLineUserId(idToken, expectedLineUserId, env) {
   if (typeof idToken !== 'string' || !idToken.trim()) return null;
-  const configuredLiffId = (env && env.LIFF_ID_REGISTER) || LIFF_ID_REGISTER;
-  const channelId = ((env && env.LINE_LOGIN_CHANNEL_ID) || configuredLiffId.split('-')[0] || '').trim();
+  const configuredRegLiffId = (env && env.LIFF_ID_REGISTER) || LIFF_ID_REGISTER;
+  const configuredLeaveLiffId = (env && env.LIFF_ID_LEAVE) || LIFF_ID_LEAVE;
+  const channelId = ((env && env.LINE_LOGIN_CHANNEL_ID) || configuredRegLiffId.split('-')[0] || '').trim();
   if (!/^\d+$/.test(channelId)) return null;
-  const form = new URLSearchParams({ id_token: idToken, client_id: channelId });
-  if (typeof expectedLineUserId === 'string' && expectedLineUserId.trim()) form.set('user_id', expectedLineUserId.trim());
+
+  const validChannels = new Set([
+    channelId,
+    (configuredRegLiffId.split('-')[0] || '').trim(),
+    (configuredLeaveLiffId.split('-')[0] || '').trim()
+  ].filter(id => /^\d+$/.test(id)));
+
+  const form = new URLSearchParams({ id_token: idToken.trim(), client_id: channelId });
   try {
     const response = await fetch('https://api.line.me/oauth2/v2.1/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString()
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn('LINE verify endpoint returned error:', response.status, errText);
+      return null;
+    }
     const claims = await response.json();
-    if (!claims || claims.aud !== channelId || typeof claims.sub !== 'string' || !claims.sub) return null;
-    if (expectedLineUserId && claims.sub !== expectedLineUserId) return null;
+    if (!claims || !validChannels.has(claims.aud) || typeof claims.sub !== 'string' || !claims.sub) {
+      console.warn('LINE verify claims invalid:', claims ? { aud: claims.aud, expectedChannels: Array.from(validChannels) } : 'no claims');
+      return null;
+    }
+    if (expectedLineUserId && claims.sub !== expectedLineUserId) {
+      console.warn('LINE verify user ID mismatch:', { tokenSub: claims.sub, expected: expectedLineUserId });
+      return null;
+    }
     return claims.sub;
   } catch (err) {
     console.error('LINE ID token verification failed:', err.message);

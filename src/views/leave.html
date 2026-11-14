@@ -31,6 +31,19 @@
 
   <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
 
+    <!-- NAV BAR -->
+    <div id="navBar" class="hidden bg-white border-b border-gray-100 px-4 py-2 flex items-center justify-between">
+      <a href="/" class="inline-flex items-center text-xs font-medium text-gray-600 hover:text-blue-600 transition gap-1.5 py-1 px-2 rounded-lg hover:bg-gray-50">
+        <i class="fa-solid fa-house-chimney text-sm"></i>
+        <span>หน้าแรก</span>
+      </a>
+      <button type="button" id="logoutBtn"
+              class="inline-flex items-center text-xs font-medium text-gray-500 hover:text-red-600 transition gap-1.5 py-1 px-2 rounded-lg hover:bg-red-50">
+        <i class="fa-solid fa-right-from-bracket text-sm"></i>
+        <span>ออกจากระบบ</span>
+      </button>
+    </div>
+
     <!-- HEADER -->
     <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 px-6 py-6 text-white text-center">
       <div class="w-16 h-16 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
@@ -311,12 +324,35 @@ function hideLoading() {
 
 function showError(title, message) {
   loadingOverlay.classList.remove("hidden");
+  const cleanRedirectUri = window.location.origin + window.location.pathname;
+  const isAuthError = message && (
+    message.includes("LINE authentication") ||
+    message.includes("401") ||
+    message.includes("token") ||
+    message.includes("เซสชัน")
+  );
 
   loadingOverlay.innerHTML = `
-    <div class="text-red-500">
-      <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
-      <p class="font-semibold text-sm">${escapeHtml(title)}</p>
-      <p class="text-xs text-gray-500 mt-2">${escapeHtml(message)}</p>
+    <div class="text-center p-4 max-w-sm mx-auto">
+      <div class="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+      </div>
+      <p class="font-bold text-gray-800 text-sm">${escapeHtml(title)}</p>
+      <p class="text-xs text-gray-500 mt-2 mb-4 leading-relaxed">
+        ${isAuthError
+          ? "เซสชันการเข้าสู่ระบบ LINE บนเบราว์เซอร์นี้หมดอายุแล้ว กรุณากดปุ่มด้านล่างเพื่อเข้าสู่ระบบ LINE ใหม่อีกครั้ง"
+          : escapeHtml(message)}
+      </p>
+      <div class="flex flex-col gap-2 justify-center">
+        <button type="button" onclick="try{liff.logout();}catch(e){};liff.login({redirectUri:'${cleanRedirectUri}'});"
+                class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow transition">
+          <i class="fa-solid fa-arrow-rotate-right mr-1.5"></i> เข้าสู่ระบบ LINE อีกครั้ง
+        </button>
+        <button type="button" onclick="window.location.reload();"
+                class="w-full py-2 px-4 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold transition">
+          โหลดหน้านี้ใหม่
+        </button>
+      </div>
     </div>`;
 }
 
@@ -389,6 +425,7 @@ function liffDiag() {
 
 function showLiffProblem(title, detail, showLogin = false) {
   loadingOverlay.classList.remove("hidden");
+  const cleanRedirectUri = window.location.origin + window.location.pathname;
 
   loadingOverlay.innerHTML = `
     <div class="text-red-500 text-left">
@@ -399,9 +436,9 @@ function showLiffProblem(title, detail, showLogin = false) {
       <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
       ${showLogin ? `
         <div class="text-center mt-3">
-          <button type="button" onclick="liff.login()"
-                  class="px-4 py-2 rounded-lg bg-green-500 text-white text-sm">
-            ลองเข้าสู่ระบบ LINE
+          <button type="button" onclick="try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
+                  class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow">
+            <i class="fa-solid fa-arrow-rotate-right mr-1"></i> เข้าสู่ระบบ LINE ใหม่อีกครั้ง
           </button>
         </div>` : ""}
       <pre class="text-[10px] text-gray-400 mt-3 whitespace-pre-wrap break-all bg-gray-50 p-2 rounded">${escapeHtml(JSON.stringify(liffDiag(), null, 2))}</pre>
@@ -412,6 +449,7 @@ function showLiffProblem(title, detail, showLogin = false) {
 
 async function initializeLiff() {
   const started = performance.now();
+  const cleanRedirectUri = window.location.origin + window.location.pathname;
 
   try {
     setLoading("กำลังเชื่อมต่อ LINE LIFF...");
@@ -430,19 +468,61 @@ async function initializeLiff() {
 
     await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
 
+    // Clean URL query params if returning from LINE Login (removes ?code=...&state=...)
+    if (window.location.search && (window.location.search.includes("code=") || window.location.search.includes("state="))) {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {}
+    }
+
     console.log("[LIFF] init =", Math.round(performance.now() - started), "ms");
+
+    // Show nav bar on PC after LIFF is initialized
+    try {
+      if (!liff.isInClient()) {
+        var nav = document.getElementById("navBar");
+        if (nav) nav.classList.remove("hidden");
+      }
+    } catch (e) {}
 
     if (!liff.isLoggedIn()) {
       // Auto login on PC / external browser
-      liff.login({ redirectUri: window.location.href });
+      liff.login({ redirectUri: cleanRedirectUri });
+      return;
+    }
+
+    idToken = liff.getIDToken() || "";
+
+    // In external browsers (PC), tokens expire after 1 hour.
+    // If idToken is missing or expired, force refresh by logging in again.
+    let isExpired = !idToken;
+    try {
+      const decoded = (typeof liff.getDecodedIDToken === "function") ? liff.getDecodedIDToken() : null;
+      if (decoded && decoded.exp && (Date.now() >= (decoded.exp * 1000 - 30000))) {
+        isExpired = true;
+      }
+    } catch (e) {
+      isExpired = true;
+    }
+
+    if (isExpired && !liff.isInClient()) {
+      console.warn("User ID token expired or missing on PC, refreshing session...");
+      try { liff.logout(); } catch (e) {}
+      liff.login({ redirectUri: cleanRedirectUri });
       return;
     }
 
     setLoading("กำลังอ่านข้อมูลบัญชี LINE...");
 
-    idToken = liff.getIDToken() || "";
-
-    const profile = await liff.getProfile();
+    let profile;
+    try {
+      profile = await liff.getProfile();
+    } catch (profErr) {
+      console.warn("Could not getProfile (session possibly stale), resetting...", profErr);
+      try { liff.logout(); } catch (e) {}
+      liff.login({ redirectUri: cleanRedirectUri });
+      return;
+    }
 
     currentProfile = profile;
     employeeLineIdInput.value = profile.userId;
@@ -451,7 +531,17 @@ async function initializeLiff() {
 
     setLoading("กำลังตรวจสอบข้อมูลพนักงาน...");
 
-    await checkEmployeeRegistration(profile.userId);
+    try {
+      await checkEmployeeRegistration(profile.userId);
+    } catch (checkErr) {
+      if (checkErr.message && (checkErr.message.includes("LINE authentication required") || checkErr.message.includes("401"))) {
+        console.warn("ID Token expired or invalid on backend, re-authenticating...", checkErr);
+        try { liff.logout(); } catch (e) {}
+        liff.login({ redirectUri: cleanRedirectUri });
+        return;
+      }
+      throw checkErr;
+    }
 
     loadingTime.textContent = "ใช้เวลา " + Math.round(performance.now() - started) + " ms";
 
@@ -477,6 +567,12 @@ async function checkEmployeeRegistration(lineUserId) {
 
   } catch (error) {
     console.error("CHECK EMPLOYEE ERROR", error);
+    if (error.message && (error.message.includes("LINE authentication required") || error.message.includes("401"))) {
+      console.warn("Auth token invalid/expired during checkEmployee, re-authenticating...");
+      try { liff.logout(); } catch (e) {}
+      liff.login({ redirectUri: window.location.origin + window.location.pathname });
+      return;
+    }
     showError("ไม่สามารถตรวจสอบข้อมูลพนักงานได้", error.message);
   }
 }
@@ -693,7 +789,11 @@ function handleSubmitSuccess(res) {
       timerProgressBar: !isWarn
     }).then(() => {
       try {
-        if (liff.isInClient()) liff.closeWindow();
+        if (liff.isInClient()) {
+          liff.closeWindow();
+        } else {
+          window.location.href = "/";
+        }
       } catch (e) {}
     });
 
@@ -724,6 +824,34 @@ function handleSubmitError(error) {
 /* ===================== START ===================== */
 
 window.addEventListener("DOMContentLoaded", initializeLiff);
+
+/* ===================== NAV BAR (PC) ===================== */
+
+(function setupNavBar() {
+  try {
+    var nav = document.getElementById("navBar");
+    var btn = document.getElementById("logoutBtn");
+    if (!nav || !btn) return;
+
+    // Show nav bar only on external browser (PC)
+    function showNavIfPC() {
+      try {
+        if (typeof liff !== "undefined" && typeof liff.isInClient === "function" && !liff.isInClient()) {
+          nav.classList.remove("hidden");
+        }
+      } catch (e) {}
+    }
+
+    // Try immediately and also after LIFF init
+    showNavIfPC();
+    window.addEventListener("load", function() { setTimeout(showNavIfPC, 500); });
+
+    btn.addEventListener("click", function () {
+      try { liff.logout(); } catch (e) {}
+      window.location.href = "/";
+    });
+  } catch (e) {}
+})();
   </script>
 
 </body>
