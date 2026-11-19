@@ -38,9 +38,10 @@
 
 | ส่วนประกอบ | รายละเอียด | สถานะ |
 | :--- | :--- | :---: |
-| **Cloudflare Worker** | `line-leave-relay.tvingame00258.workers.dev` | 🟢 ทำงานปกติ |
+| **Cloudflare Worker** | `line-leave-relay.finnlution.workers.dev` | 🟢 ทำงานปกติ |
 | **Supabase Project** | `tsjfqjisabmbrgbdgyif` (leave-system) | 🟢 เชื่อมต่อแล้ว |
 | **LINE Official Account** | Channel Secret & Access Token ติดตั้งใน Worker | 🟢 พร้อมใช้งาน |
+| **LIFF หน้าแรก (Portal)** | ID: `2011955364-wZgUDTq6` (`/`) | 🟢 พร้อมใช้งาน |
 | **LIFF ลงทะเบียน** | ID: `2011955364-O2qTmo0r` (`/register`) | 🟢 พร้อมใช้งาน |
 | **LIFF ยื่นใบลา** | ID: `2011955364-FCY27ABh` (`/leave`) | 🟢 พร้อมใช้งาน |
 
@@ -86,28 +87,34 @@
 
 ---
 
-## 🔒 ข้อแนะนำด้านความปลอดภัย (Supabase Security Advisory)
+## 🔒 ความปลอดภัย
 
-ปัจจุบันตาราง `employees` และ `leave_requests` ยังไม่ได้เปิดใช้งาน **Row Level Security (RLS)**:
-- **คำแนะนำ**: ควรกดเปิด RLS เพื่อป้องกันไม่ให้บุคคลภายนอกใช้ Anonymous API Key เข้าถึงหรือเปลี่ยนแปลงข้อมูลในฐานข้อมูลโดยตรง
-- เนื่องจาก Cloudflare Worker เชื่อมต่อด้วย `SUPABASE_SECRET_KEY` (Service Role Key) อยู่แล้ว การเปิด RLS จะไม่กระทบต่อการทำงานของระบบ แต่จะช่วยป้องกันการเจาะระบบจากภายนอกได้อย่างสมบูรณ์
-- สามารถดูคำสั่ง SQL ได้ที่ไฟล์ [`supabase/rls_security.sql`](file:///c:/Users/USER/Downloads/โปรเจกต์ระบบลา/supabase/rls_security.sql)
+- ตาราง `employees` และ `leave_requests` เปิดใช้ **Row Level Security (RLS)** แล้ว การเข้าถึงข้อมูลของแอปทำผ่าน Cloudflare Worker ด้วย secret ที่เก็บใน Worker เท่านั้น
+- รายงาน HR ต้องยืนยัน LINE และตรวจ LINE User ID กับ `HR_LINE_USER_IDS`; URL `/export-hr` ใช้ดาวน์โหลดแบบสาธารณะไม่ได้
+- หน้าระบุเหตุผลปฏิเสธแสดงข้อมูลให้ผู้อนุมัติที่ได้รับมอบหมาย ลิงก์มีลายเซ็นและหมดอายุใน 15 นาที
+- ปิด `ALLOW_ROOT_MANAGER_REGISTRATION` หลังตั้งค่าผู้จัดการเริ่มต้นแล้ว
+- สคริปต์ฐานข้อมูลที่ใช้กับการตั้งค่าใหม่และเพิ่มคอลัมน์อนุมัติหลายระดับอยู่ใน [`supabase/schema.sql`](supabase/schema.sql) และการตั้งค่า RLS อยู่ใน [`supabase/rls_security.sql`](supabase/rls_security.sql)
 
 ---
 
 ## 🛠️ วิธีการทดสอบและ Deploy
 
-### 1. ทดสอบการเชื่อมต่อ
+### 1. ทดสอบหน้าเว็บและการควบคุมสิทธิ์ด้วย Playwright
 ```bash
-node test-connection.js
+npm test
 ```
 
-### 2. บิลด์ไฟล์ใหม่เมื่อมีการแก้ไขหน้า HTML หรือ Worker
+### 2. ตรวจสอบการเชื่อมต่อกับบริการจริง
+```bash
+npm run test:connection
+```
+
+### 3. บิลด์ไฟล์ใหม่เมื่อมีการแก้ไขหน้า HTML หรือ Worker
 ```bash
 node build.js
 ```
 
-### 3. Deploy ไปยัง Cloudflare Worker
+### 4. Deploy ไปยัง Cloudflare Worker
 ```bash
 npx wrangler deploy
 ```

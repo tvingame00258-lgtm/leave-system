@@ -13,8 +13,10 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
   <style>
+    [hidden] { display: none !important; }
     body {
       font-family: 'Prompt', sans-serif;
       background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
@@ -36,11 +38,20 @@
           <p class="text-[11px] text-gray-500">Connected with LINE &amp; Supabase</p>
         </div>
       </div>
-      <div class="flex items-center space-x-2">
-        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+      <div class="flex items-center gap-2 sm:gap-3">
+        <span class="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse"></span>
           ระบบออนไลน์
         </span>
+        <div id="accountPanel" class="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-2.5 py-2 shadow-sm" aria-live="polite">
+          <img id="accountAvatar" alt="" hidden class="w-8 h-8 rounded-full object-cover border border-gray-200">
+          <div class="min-w-0 max-w-[130px] sm:max-w-[180px]">
+            <p id="accountStatus" class="text-[10px] text-gray-500 leading-tight">กำลังตรวจสอบ LINE...</p>
+            <p id="accountName" hidden class="truncate text-xs font-semibold text-gray-800"></p>
+          </div>
+          <button id="lineLoginBtn" type="button" class="rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm flex items-center gap-1.5 transition"><i class="fa-brands fa-line text-sm"></i> เข้าสู่ระบบ LINE</button>
+          <button id="lineLogoutBtn" type="button" hidden class="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50">ออกจากระบบ</button>
+        </div>
       </div>
     </div>
   </header>
@@ -62,56 +73,77 @@
       </p>
     </div>
 
+    <!-- LOGIN PROMPT BANNER (SHOWN WHEN NOT LOGGED IN) -->
+    <div id="loginPromptBanner" class="max-w-3xl mx-auto w-full mb-8 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+      <div class="flex items-center space-x-3.5">
+        <div class="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-xl flex-shrink-0">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <div>
+          <h4 class="text-sm font-bold text-gray-800">ระบบถูกล็อกไว้: กรุณาเข้าสู่ระบบ LINE ก่อนทำรายการ</h4>
+          <p class="text-xs text-gray-500 mt-0.5">คุณต้องเข้าสู่ระบบ LINE ด้านบนก่อน การ์ดลงทะเบียนและยื่นใบลาจึงจะเปิดให้กดทำรายการได้ครับ</p>
+        </div>
+      </div>
+      <button type="button" id="bannerLoginBtn" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-semibold shadow transition flex items-center justify-center gap-1.5 flex-shrink-0">
+        <i class="fa-brands fa-line text-base"></i>
+        <span>เข้าสู่ระบบเพื่อปลดล็อก</span>
+      </button>
+    </div>
+
     <!-- ACTION CARDS (2 PRIMARY OPTIONS) -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto w-full mb-10">
 
       <!-- CARD 1: REGISTER -->
       <a href="/register"
-         class="group bg-white rounded-2xl p-6 sm:p-8 shadow-sm hover:shadow-xl border border-gray-200/80 hover:border-blue-400 transition-all duration-200 transform hover:-translate-y-1 flex flex-col justify-between">
+         id="cardRegister"
+         data-locked="true"
+         class="group bg-white rounded-2xl p-6 sm:p-8 shadow-sm transition-all duration-200 border border-gray-200/80 flex flex-col justify-between">
         <div>
-          <div class="w-14 h-14 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">
+          <div id="cardRegisterIcon" class="w-14 h-14 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center text-2xl mb-5 transition-transform">
             <i class="fa-solid fa-id-card"></i>
           </div>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
               ลงทะเบียนพนักงาน
             </h3>
-            <span class="text-xs bg-blue-50 text-blue-600 font-semibold px-2 py-0.5 rounded-md border border-blue-100">
-              ครั้งแรก
+            <span id="cardRegisterBadge" class="text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-flex items-center gap-1">
+              <i class="fa-solid fa-lock text-[10px]"></i> ต้องเข้าสู่ระบบก่อน
             </span>
           </div>
-          <p class="text-xs text-gray-500 mt-2 leading-relaxed">
+          <p id="cardRegisterDesc" class="text-xs text-gray-500 mt-2 leading-relaxed">
             ผูกบัญชี LINE กับรหัสพนักงาน ตรวจสอบชื่อ-สกุล สังกัดบริษัท ฝ่าย แผนก และเลือกหัวหน้าผู้อนุมัติงาน
           </p>
         </div>
         <div class="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between text-blue-600 font-semibold text-sm">
-          <span>เข้าสู่หน้าลงทะเบียน</span>
-          <i class="fa-solid fa-arrow-right group-hover:translate-x-1.5 transition-transform"></i>
+          <span id="cardRegisterBtn">เข้าสู่หน้าลงทะเบียน</span>
+          <i id="cardRegisterArrow" class="fa-solid fa-arrow-right group-hover:translate-x-1.5 transition-transform"></i>
         </div>
       </a>
 
       <!-- CARD 2: LEAVE REQUEST -->
       <a href="/leave"
-         class="group bg-white rounded-2xl p-6 sm:p-8 shadow-sm hover:shadow-xl border border-gray-200/80 hover:border-emerald-400 transition-all duration-200 transform hover:-translate-y-1 flex flex-col justify-between">
+         id="cardLeave"
+         data-locked="true"
+         class="group bg-white rounded-2xl p-6 sm:p-8 shadow-sm transition-all duration-200 border border-gray-200/80 flex flex-col justify-between">
         <div>
-          <div class="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl mb-5 group-hover:scale-110 transition-transform">
+          <div id="cardLeaveIcon" class="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl mb-5 transition-transform">
             <i class="fa-solid fa-file-signature"></i>
           </div>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-bold text-gray-900 group-hover:text-emerald-600 transition-colors">
               ยื่นใบลาออนไลน์
             </h3>
-            <span class="text-xs bg-emerald-50 text-emerald-600 font-semibold px-2 py-0.5 rounded-md border border-emerald-100">
-              ยื่นขอลา
+            <span id="cardLeaveBadge" class="text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-flex items-center gap-1">
+              <i class="fa-solid fa-lock text-[10px]"></i> ต้องเข้าสู่ระบบก่อน
             </span>
           </div>
-          <p class="text-xs text-gray-500 mt-2 leading-relaxed">
+          <p id="cardLeaveDesc" class="text-xs text-gray-500 mt-2 leading-relaxed">
             เลือกประเภทการลา (ลาป่วย, ลากิจ, ลาพักร้อน) ระบุวันที่และเหตุผล ระบบจะส่งการ์ดแจ้งเตือนหาหัวหน้างานอัตโนมัติ
           </p>
         </div>
         <div class="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between text-emerald-600 font-semibold text-sm">
-          <span>เข้าสู่หน้าขอยื่นใบลา</span>
-          <i class="fa-solid fa-arrow-right group-hover:translate-x-1.5 transition-transform"></i>
+          <span id="cardLeaveBtn">เข้าสู่หน้าขอยื่นใบลา</span>
+          <i id="cardLeaveArrow" class="fa-solid fa-arrow-right group-hover:translate-x-1.5 transition-transform"></i>
         </div>
       </a>
 
@@ -125,20 +157,15 @@
         </div>
         <div>
           <h4 class="text-sm font-bold text-gray-800">สำหรับฝ่ายบุคคล (HR Report)</h4>
-          <p class="text-xs text-gray-500">ดาวน์โหลดสรุปข้อมูลการลาเป็น CSV หรือดึงเข้า Excel Power Query</p>
+          <p class="text-xs text-gray-500">ดาวน์โหลดข้อมูลการลาเป็น CSV หลังยืนยันบัญชี HR ผ่าน LINE</p>
         </div>
       </div>
       <div class="flex items-center space-x-2 flex-shrink-0">
-        <button onclick="copyHrLink()"
-                class="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition flex items-center space-x-1">
-          <i class="fa-regular fa-copy"></i>
-          <span>คัดลอกลิงก์ Excel</span>
-        </button>
-        <a href="/export-hr"
+        <button id="downloadHrReport" type="button"
            class="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition flex items-center space-x-1">
           <i class="fa-solid fa-download"></i>
-          <span>โหลด CSV</span>
-        </a>
+          <span>ดาวน์โหลดรายงาน HR</span>
+        </button>
       </div>
     </div>
 
@@ -166,20 +193,270 @@
   </footer>
 
   <script>
-    function copyHrLink() {
-      const url = window.location.origin + '/export-hr';
-      navigator.clipboard.writeText(url).then(() => {
-        Swal.fire({
-          icon: 'success',
-          title: 'คัดลอกลิงก์สำเร็จ',
-          text: url,
-          timer: 2000,
-          showConfirmButton: false
-        });
-      }).catch(() => {
-        prompt('คัดลอกลิงก์นี้ไปใส่ใน Excel (Data -> From Web):', url);
+    const PORTAL_LIFF_ID = "__PORTAL_LIFF_ID__";
+    const REGISTER_LIFF_ID = "__REGISTER_LIFF_ID__";
+    const LEAVE_LIFF_ID = "__LEAVE_LIFF_ID__";
+    let isUserLoggedIn = false;
+
+    const accountStatus = document.getElementById('accountStatus');
+    const accountName = document.getElementById('accountName');
+    const accountAvatar = document.getElementById('accountAvatar');
+    const lineLoginBtn = document.getElementById('lineLoginBtn');
+    const lineLogoutBtn = document.getElementById('lineLogoutBtn');
+
+    const loginPromptBanner = document.getElementById('loginPromptBanner');
+    const bannerLoginBtn = document.getElementById('bannerLoginBtn');
+
+    const cardRegister = document.getElementById('cardRegister');
+    const cardRegisterBadge = document.getElementById('cardRegisterBadge');
+    const cardRegisterDesc = document.getElementById('cardRegisterDesc');
+    const cardRegisterBtn = document.getElementById('cardRegisterBtn');
+
+    const cardLeave = document.getElementById('cardLeave');
+    const cardLeaveBadge = document.getElementById('cardLeaveBadge');
+    const cardLeaveDesc = document.getElementById('cardLeaveDesc');
+    const cardLeaveBtn = document.getElementById('cardLeaveBtn');
+
+    if (bannerLoginBtn) {
+      bannerLoginBtn.addEventListener('click', () => {
+        if (lineLoginBtn) lineLoginBtn.click();
       });
     }
+
+    function handleCardClick(e) {
+      if (!isUserLoggedIn) {
+        e.preventDefault();
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'warning',
+            title: 'กรุณาเข้าสู่ระบบ LINE ก่อน',
+            text: 'คุณต้องกดปุ่ม "เข้าสู่ระบบ LINE" ด้านบนก่อน จึงจะสามารถเปิดแบบฟอร์มลงทะเบียนและยื่นใบลาได้ครับ',
+            confirmButtonText: '<i class="fa-brands fa-line mr-1"></i> เข้าสู่ระบบ LINE ตอนนี้',
+            confirmButtonColor: '#059669',
+            showCancelButton: true,
+            cancelButtonText: 'ยกเลิก',
+            cancelButtonColor: '#6B7280'
+          }).then(res => {
+            if (res.isConfirmed && lineLoginBtn) {
+              lineLoginBtn.click();
+            }
+          });
+        } else if (lineLoginBtn) {
+          lineLoginBtn.click();
+        }
+        return false;
+      }
+
+      // If user is inside LINE mobile client, open via official LIFF URL so LINE transitions smoothly
+      if (typeof liff !== 'undefined' && typeof liff.isInClient === 'function' && liff.isInClient()) {
+        e.preventDefault();
+        const targetUrl = (this.id === 'cardRegister')
+          ? ('https://liff.line.me/' + REGISTER_LIFF_ID)
+          : ('https://liff.line.me/' + LEAVE_LIFF_ID);
+        try {
+          liff.openWindow({ url: targetUrl, external: false });
+        } catch (err) {
+          window.location.href = targetUrl;
+        }
+        return false;
+      }
+    }
+
+    if (cardRegister) cardRegister.addEventListener('click', handleCardClick);
+    if (cardLeave) cardLeave.addEventListener('click', handleCardClick);
+
+    function lockCards() {
+      isUserLoggedIn = false;
+      if (loginPromptBanner) loginPromptBanner.hidden = false;
+
+      // Lock Card 1: Register
+      if (cardRegister) {
+        cardRegister.setAttribute('data-locked', 'true');
+        cardRegister.classList.add('opacity-80', 'bg-gray-50/70', 'border-gray-200');
+        cardRegister.classList.remove('hover:border-blue-400', 'hover:-translate-y-1', 'hover:shadow-xl');
+      }
+      if (cardRegisterBadge) {
+        cardRegisterBadge.className = "text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-flex items-center gap-1";
+        cardRegisterBadge.innerHTML = '<i class="fa-solid fa-lock text-[10px]"></i> ต้องเข้าสู่ระบบก่อน';
+      }
+      if (cardRegisterDesc) {
+        cardRegisterDesc.textContent = "ระบบถูกล็อก: กรุณาเข้าสู่ระบบ LINE ด้านบนก่อน จึงจะสามารถลงทะเบียนหรือผูกบัญชีพนักงานได้ครับ";
+      }
+      if (cardRegisterBtn) {
+        cardRegisterBtn.className = "text-xs text-gray-400 font-medium inline-flex items-center gap-1";
+        cardRegisterBtn.innerHTML = '<i class="fa-solid fa-lock text-xs mr-1 text-amber-500"></i> เข้าสู่ระบบ LINE ก่อนทำรายการ';
+      }
+
+      // Lock Card 2: Leave
+      if (cardLeave) {
+        cardLeave.setAttribute('data-locked', 'true');
+        cardLeave.classList.add('opacity-80', 'bg-gray-50/70', 'border-gray-200');
+        cardLeave.classList.remove('hover:border-emerald-400', 'hover:-translate-y-1', 'hover:shadow-xl');
+      }
+      if (cardLeaveBadge) {
+        cardLeaveBadge.className = "text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-flex items-center gap-1";
+        cardLeaveBadge.innerHTML = '<i class="fa-solid fa-lock text-[10px]"></i> ต้องเข้าสู่ระบบก่อน';
+      }
+      if (cardLeaveDesc) {
+        cardLeaveDesc.textContent = "ระบบถูกล็อก: กรุณาเข้าสู่ระบบ LINE ด้านบนก่อน จึงจะสามารถเปิดแบบฟอร์มยื่นใบลาได้ครับ";
+      }
+      if (cardLeaveBtn) {
+        cardLeaveBtn.className = "text-xs text-gray-400 font-medium inline-flex items-center gap-1";
+        cardLeaveBtn.innerHTML = '<i class="fa-solid fa-lock text-xs mr-1 text-amber-500"></i> เข้าสู่ระบบ LINE ก่อนทำรายการ';
+      }
+    }
+
+    function unlockCards(profile, empData) {
+      isUserLoggedIn = true;
+      if (loginPromptBanner) loginPromptBanner.hidden = true;
+
+      if (cardRegister) {
+        cardRegister.setAttribute('data-locked', 'false');
+        cardRegister.classList.remove('opacity-80', 'bg-gray-50/70', 'border-gray-200');
+        cardRegister.classList.add('hover:border-blue-400', 'hover:-translate-y-1', 'hover:shadow-xl');
+      }
+      if (cardLeave) {
+        cardLeave.setAttribute('data-locked', 'false');
+        cardLeave.classList.remove('opacity-80', 'bg-gray-50/70', 'border-gray-200');
+        cardLeave.classList.add('hover:border-emerald-400', 'hover:-translate-y-1', 'hover:shadow-xl');
+      }
+
+      if (empData && empData.isRegistered) {
+        if (cardRegisterBadge) {
+          cardRegisterBadge.className = "text-xs bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-md border border-emerald-200 inline-flex items-center gap-1";
+          cardRegisterBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> ลงทะเบียนแล้ว';
+        }
+        if (cardRegisterDesc) {
+          const detail = [empData.fullName || profile.displayName, empData.department || empData.division, empData.company].filter(Boolean).join(' • ');
+          cardRegisterDesc.textContent = `${detail} (คลิกเพื่อดูหรือแก้ไขข้อมูล)`;
+        }
+        if (cardRegisterBtn) {
+          cardRegisterBtn.className = "text-sm text-blue-600 font-semibold";
+          cardRegisterBtn.textContent = "ดู / แก้ไขข้อมูลลงทะเบียน";
+        }
+        if (cardLeaveBadge) {
+          cardLeaveBadge.className = "text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-md border border-blue-200 inline-flex items-center gap-1";
+          cardLeaveBadge.innerHTML = '<i class="fa-solid fa-bolt"></i> พร้อมยื่นใบลา';
+        }
+        if (cardLeaveDesc) {
+          cardLeaveDesc.textContent = `เชื่อมต่อบัญชี ${profile.displayName} แล้ว พร้อมส่งคำขอลาหาหัวหน้างานทันที`;
+        }
+        if (cardLeaveBtn) {
+          cardLeaveBtn.className = "text-sm text-emerald-600 font-semibold";
+          cardLeaveBtn.textContent = "เข้าสู่หน้าขอยื่นใบลา (เชื่อมต่อแล้ว)";
+        }
+      } else {
+        if (cardRegisterBadge) {
+          cardRegisterBadge.className = "text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md border border-amber-200 inline-flex items-center gap-1 animate-pulse";
+          cardRegisterBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ยังไม่ลงทะเบียน';
+        }
+        if (cardRegisterDesc) {
+          cardRegisterDesc.textContent = "บัญชี LINE นี้ยังไม่ได้ลงทะเบียนพนักงาน กรุณากดลงทะเบียนก่อนเริ่มยื่นใบลา";
+        }
+        if (cardRegisterBtn) {
+          cardRegisterBtn.className = "text-sm text-blue-600 font-semibold";
+          cardRegisterBtn.textContent = "เข้าสู่หน้าลงทะเบียนทันที";
+        }
+        if (cardLeaveBadge) {
+          cardLeaveBadge.className = "text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-md";
+          cardLeaveBadge.textContent = "ต้องลงทะเบียนก่อน";
+        }
+        if (cardLeaveDesc) {
+          cardLeaveDesc.textContent = "หลังจากลงทะเบียนพนักงานสำเร็จ จะสามารถยื่นใบลาออนไลน์ได้ทันที";
+        }
+        if (cardLeaveBtn) {
+          cardLeaveBtn.className = "text-xs text-gray-400 font-medium";
+          cardLeaveBtn.textContent = "กรุณาลงทะเบียนพนักงานก่อน";
+        }
+      }
+    }
+
+    function showSignedOut(message = 'ยังไม่ได้เข้าสู่ระบบ') {
+      accountStatus.textContent = message;
+      accountName.textContent = '';
+      accountName.hidden = true;
+      accountAvatar.removeAttribute('src');
+      accountAvatar.hidden = true;
+      lineLoginBtn.hidden = false;
+      lineLogoutBtn.hidden = true;
+      lockCards();
+    }
+
+    lineLoginBtn.addEventListener('click', () => {
+      if (typeof liff === 'undefined' || !PORTAL_LIFF_ID || PORTAL_LIFF_ID.startsWith('__')) {
+        showSignedOut('เชื่อมต่อ LINE ไม่สำเร็จ');
+        return;
+      }
+      window.LeaveSystemAuth?.beginLogin(PORTAL_LIFF_ID);
+      liff.login({ redirectUri: window.location.href });
+    });
+
+    lineLogoutBtn.addEventListener('click', () => {
+      window.LeaveSystemAuth?.logout();
+      showSignedOut();
+    });
+
+    (async () => {
+      try {
+        if (typeof liff === 'undefined' || !PORTAL_LIFF_ID || PORTAL_LIFF_ID.startsWith('__')) {
+          showSignedOut('เชื่อมต่อ LINE ไม่สำเร็จ');
+          return;
+        }
+        await liff.init({ liffId: PORTAL_LIFF_ID });
+        if (window.LeaveSystemAuth?.shouldBlock(PORTAL_LIFF_ID)) {
+          if (liff.isLoggedIn()) liff.logout();
+          showSignedOut();
+          return;
+        }
+        if (!liff.isLoggedIn()) {
+          showSignedOut();
+          return;
+        }
+        const profile = await liff.getProfile();
+        if (window.LeaveSystemAuth && !window.LeaveSystemAuth.completeLogin(PORTAL_LIFF_ID, profile.userId)) {
+          window.LeaveSystemAuth.logout();
+          showSignedOut('กรุณาเข้าสู่ระบบ LINE ใหม่');
+          return;
+        }
+        accountStatus.textContent = 'ล็อกอินผ่าน LINE';
+        accountName.textContent = profile.displayName || 'ผู้ใช้ LINE';
+        accountName.hidden = false;
+        if (profile.pictureUrl) {
+          accountAvatar.src = profile.pictureUrl;
+          accountAvatar.hidden = false;
+        }
+        lineLoginBtn.hidden = true;
+        lineLogoutBtn.hidden = false;
+
+        try {
+          const idToken = liff.getIDToken() || '';
+          const res = await fetch('/api', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fn: 'getEmployeeProfile',
+              args: [profile.userId, idToken]
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const empData = data && data.ok ? data.result : null;
+            unlockCards(profile, empData);
+          } else {
+            unlockCards(profile, null);
+          }
+        } catch (e) {
+          unlockCards(profile, null);
+        }
+      } catch (error) {
+        console.warn('Could not load LINE account info:', error);
+        showSignedOut('ตรวจสอบบัญชี LINE ไม่สำเร็จ');
+      }
+    })();
+
+    document.getElementById('downloadHrReport').addEventListener('click', () => {
+      window.location.assign('/export-hr');
+    });
   </script>
 
 </body>

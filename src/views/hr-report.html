@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>รายงาน HR | ระบบบริหารการลา</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#f3f4f6;color:#111827;margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}
+    main{width:min(100%,480px);background:#fff;border-radius:20px;padding:28px;box-shadow:0 12px 35px #11182718}
+    h1{font-size:1.35rem;margin:0 0 8px}p{color:#4b5563;line-height:1.6}#hrReportCard{border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-top:18px;background:#fafafa}
+    #hrReportStatus{font-weight:600;margin:0}.ok{color:#047857}.denied{color:#b91c1c}.pending{color:#374151}
+    button{border:0;border-radius:10px;padding:12px 16px;background:#0f766e;color:white;font-weight:600;cursor:pointer;margin-top:12px}button:disabled{opacity:.6;cursor:wait}
+    [hidden]{display:none!important}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>รายงาน HR</h1>
+    <p>เข้าสู่ระบบ LINE เพื่อยืนยันสิทธิ์ก่อนดาวน์โหลดรายงาน</p>
+    <section id="hrReportCard" aria-live="polite">
+      <p id="hrReportStatus" class="pending">กำลังตรวจสอบสิทธิ์...</p>
+      <button id="downloadLink" type="button" hidden>ดาวน์โหลดรายงาน HR</button>
+    </section>
+  </main>
+  <script>
+    const LIFF_ID = "__LIFF_ID__";
+    const statusEl = document.getElementById('hrReportStatus');
+    const button = document.getElementById('downloadLink');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const profile = await liff.getProfile();
+        const response = await fetch('/api', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })
+        });
+        if (!response.ok) throw new Error(response.status === 403 ? 'บัญชี LINE นี้ไม่มีสิทธิ์ดาวน์โหลดรายงาน HR' : 'ยืนยันตัวตนไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่');
+        const fileUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a'); link.href = fileUrl; link.download = 'leave_summary.csv'; link.click();
+        setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
+      } catch (error) {
+        statusEl.textContent = error.message || 'ดาวน์โหลดรายงานไม่สำเร็จ';
+        statusEl.className = 'denied'; button.hidden = true;
+      } finally { button.disabled = false; }
+    });
+    (async () => {
+      try {
+        if (typeof liff === 'undefined' || !LIFF_ID || LIFF_ID.startsWith('__')) throw new Error('ยังไม่ได้ตั้งค่า LINE Login');
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          statusEl.textContent = 'กำลังเข้าสู่ระบบ LINE...';
+          liff.login({ redirectUri: window.location.href });
+          return;
+        }
+        const profile = await liff.getProfile();
+        const response = await fetch('/api', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })
+        });
+        if (!response.ok) throw new Error(response.status === 403 ? 'บัญชี LINE นี้ไม่มีสิทธิ์ดาวน์โหลดรายงาน HR' : 'ยืนยันตัวตนไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่');
+        statusEl.textContent = 'ยืนยันสิทธิ์ HR แล้ว พร้อมดาวน์โหลดรายงาน'; statusEl.className = 'ok'; button.hidden = false;
+      } catch (error) {
+        statusEl.textContent = error.message || 'ตรวจสอบสิทธิ์ไม่สำเร็จ'; statusEl.className = 'denied';
+      }
+    })();
+  </script>
+</body>
+</html>

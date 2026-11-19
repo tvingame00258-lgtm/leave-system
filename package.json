@@ -5,7 +5,8 @@
   "main": "worker.js",
   "scripts": {
     "build": "node build.js",
-    "test": "node test-connection.js"
+    "test": "playwright test --config=playwright.config.cjs",
+    "test:connection": "node test-connection.js"
   },
   "keywords": [
     "line",
@@ -17,6 +18,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "playwright": "^1.65.1"
+    "playwright": "^1.65.1",
+    "wrangler": "^4.164.0"
   }
 }

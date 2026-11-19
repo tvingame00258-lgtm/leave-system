@@ -411,6 +411,12 @@ async function initializeLiff() {
 
     await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
 
+    if (window.LeaveSystemAuth?.shouldBlock(LIFF_ID)) {
+      if (liff.isLoggedIn()) liff.logout();
+      showLiffProblem("ออกจากระบบแล้ว", "กรุณาเข้าสู่ระบบ LINE อีกครั้งเพื่อดำเนินการต่อ", true);
+      return;
+    }
+
     // Clean URL query params if returning from LINE Login (removes ?code=...&state=...)
     if (window.location.search && (window.location.search.includes("code=") || window.location.search.includes("state="))) {
       try {
@@ -430,7 +436,8 @@ async function initializeLiff() {
 
     if (!liff.isLoggedIn()) {
       // Auto login on PC / external browser
-      liff.login({ redirectUri: cleanRedirectUri });
+      window.LeaveSystemAuth?.beginLogin(LIFF_ID);
+      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
       return;
     }
 
@@ -451,7 +458,7 @@ async function initializeLiff() {
     if (isExpired && !liff.isInClient()) {
       console.warn("User ID token expired or missing on PC, refreshing session...");
       try { liff.logout(); } catch (e) {}
-      liff.login({ redirectUri: cleanRedirectUri });
+      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
       return;
     }
 
@@ -463,7 +470,13 @@ async function initializeLiff() {
     } catch (profErr) {
       console.warn("Could not getProfile (session possibly stale), resetting...", profErr);
       try { liff.logout(); } catch (e) {}
-      liff.login({ redirectUri: cleanRedirectUri });
+      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
+      return;
+    }
+
+    if (window.LeaveSystemAuth && !window.LeaveSystemAuth.completeLogin(LIFF_ID, profile.userId)) {
+      window.LeaveSystemAuth.logout();
+      showLiffProblem("บัญชี LINE เปลี่ยนไป", "กรุณาเข้าสู่ระบบด้วยบัญชีที่ต้องการใช้งานอีกครั้ง", true);
       return;
     }
 
@@ -484,7 +497,7 @@ async function initializeLiff() {
       if (pageErr.message && (pageErr.message.includes("LINE authentication required") || pageErr.message.includes("401"))) {
         console.warn("ID Token expired or invalid on backend, re-authenticating...", pageErr);
         try { liff.logout(); } catch (e) {}
-        liff.login({ redirectUri: cleanRedirectUri });
+        liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
         return;
       }
       throw pageErr;
@@ -844,8 +857,8 @@ window.addEventListener("DOMContentLoaded", initializeLiff);
     window.addEventListener("load", function() { setTimeout(showNavIfPC, 500); });
 
     btn.addEventListener("click", function () {
-      try { liff.logout(); } catch (e) {}
-      window.location.href = "/";
+      window.LeaveSystemAuth?.logout();
+      window.location.assign("/");
     });
   } catch (e) {}
 })();

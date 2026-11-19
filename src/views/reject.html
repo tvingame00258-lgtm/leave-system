@@ -27,6 +27,15 @@
 
   <div class="max-w-md w-full mx-auto bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
 
+    <!-- NAV BAR -->
+    <div id="navBar" class="bg-white border-b border-gray-100 px-4 py-2 flex items-center justify-between">
+      <a href="/" class="inline-flex items-center text-xs font-medium text-gray-600 hover:text-blue-600 transition gap-1.5 py-1 px-2 rounded-lg hover:bg-gray-50">
+        <i class="fa-solid fa-house-chimney text-sm"></i>
+        <span>หน้าแรก</span>
+      </a>
+      <span class="text-[10px] text-gray-400 font-mono">ระบบพิจารณาคำขอ</span>
+    </div>
+
     <!-- HEADER (RED / DANGER) -->
     <div class="bg-gradient-to-r from-red-600 to-rose-700 px-6 py-6 text-white text-center">
       <div class="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
@@ -43,7 +52,7 @@
     </div>
 
     <!-- FORM -->
-    <form id="rejectForm" class="p-6 space-y-4 hidden">
+    <form id="rejectForm" class="p-6 space-y-4 hidden" hidden>
 
       <!-- REQUEST INFO CARD -->
       <div class="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
@@ -102,6 +111,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     const reqId = urlParams.get("reqId") || "";
     const urlUid = urlParams.get("uid") || "";
+    const expiresAt = Number(urlParams.get("exp") || 0);
     const sig = urlParams.get("sig") || "";
 
     const loadingOverlay = document.getElementById("loadingOverlay");
@@ -144,7 +154,7 @@
           console.warn("LIFF init skipped/failed:", liffErr);
         }
 
-        // Only redirect to login if we have NO signature AND NO login session
+        // Signed links can be verified directly. Unsigned links require LINE identity.
         if (!sig && !idToken && typeof liff !== "undefined" && liff.isLoggedIn && !liff.isLoggedIn()) {
           loadingText.textContent = "กำลังเข้าสู่ระบบ LINE...";
           liff.login({ redirectUri: window.location.href });
@@ -157,33 +167,37 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fn: "getLeaveRequestDetail",
-            args: [reqId]
+            args: [{ reqId, approverLineId: approverUserId, expiresAt, sig, idToken }]
           })
         });
 
         const data = await response.json();
-        if (data && data.ok && data.result) {
-          const req = data.result;
-          displayEmpName.textContent = req.employee_name || "ไม่ระบุ";
-          displayLeaveType.textContent = req.leave_type || "-";
-          displayDates.textContent = (req.start_date === req.end_date)
-            ? req.start_date + " (" + req.total_days + " วัน)"
-            : req.start_date + " ถึง " + req.end_date + " (" + req.total_days + " วัน)";
-        } else {
-          displayEmpName.textContent = "คำขอ: " + reqId;
+        if (!response.ok || !data || !data.ok || !data.result) {
+          if (response.status === 401 && typeof liff !== "undefined" && liff.isLoggedIn && !liff.isLoggedIn()) {
+            loadingText.textContent = "กำลังเข้าสู่ระบบ LINE...";
+            liff.login({ redirectUri: window.location.href });
+            return;
+          }
+          throw new Error(response.status === 403
+            ? "บัญชี LINE นี้ไม่มีสิทธิ์พิจารณาคำขอนี้ หรือคำขอไม่อยู่ในขั้นตอนที่คุณรับผิดชอบ"
+            : (response.status === 401
+              ? "กรุณาเข้าสู่ระบบ LINE เพื่อยืนยันตัวตนก่อนดูรายละเอียด"
+              : "ลิงก์นี้ไม่ถูกต้องหรือหมดอายุ กรุณาเปิดลิงก์จากข้อความ LINE อีกครั้ง"));
         }
+        const req = data.result;
+        displayEmpName.textContent = req.employee_name || "ไม่ระบุ";
+        displayLeaveType.textContent = req.leave_type || "-";
+        displayDates.textContent = (req.start_date === req.end_date)
+          ? req.start_date + " (" + req.total_days + " วัน)"
+          : req.start_date + " ถึง " + req.end_date + " (" + req.total_days + " วัน)";
 
         loadingOverlay.classList.add("hidden");
+        rejectForm.hidden = false;
         rejectForm.classList.remove("hidden");
 
       } catch (err) {
         console.error("Init error:", err);
-        loadingOverlay.innerHTML = `
-          <div class="text-red-500 text-center p-4">
-            <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
-            <p class="font-semibold text-sm">${err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล"}</p>
-          </div>
-        `;
+        loadingOverlay.textContent = err.message || "เกิดข้อผิดพลาดในการโหลดข้อมูล";
       }
     }
 
@@ -204,7 +218,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fn: "rejectLeaveRequest",
-            args: [{ reqId, reason, idToken, approverLineId: approverUserId, sig }]
+            args: [{ reqId, reason, idToken, approverLineId: approverUserId, expiresAt, sig }]
           })
         });
 
@@ -219,22 +233,16 @@
         await Swal.fire({
           icon: "success",
           title: "บันทึกผลเรียบร้อย",
-          text: "ระบบได้บันทึกการไม่อนุมัติ และแจ้งผลไปยังพนักงานและ HR แล้ว",
-          confirmButtonColor: "#EF4444"
+          text: "ระบบได้บันทึกการไม่อนุมัติ และส่งแจ้งเตือนไปยังแชท LINE ของคุณ, พนักงาน และ HR เรียบร้อยแล้ว",
+          confirmButtonColor: "#EF4444",
+          timer: 2500,
+          timerProgressBar: true
         });
 
         if (typeof liff !== "undefined" && liff.isInClient && liff.isInClient()) {
           liff.closeWindow();
         } else {
-          window.close();
-          document.body.innerHTML = `
-            <div class="min-h-screen flex items-center justify-center p-6 text-center">
-              <div class="bg-white p-8 rounded-2xl shadow-lg max-w-sm">
-                <i class="fa-solid fa-circle-check text-green-500 text-5xl mb-4"></i>
-                <h2 class="text-lg font-bold text-gray-800">ดำเนินการเรียบร้อยแล้ว</h2>
-                <p class="text-xs text-gray-500 mt-2">คุณสามารถปิดหน้าต่างเบราว์เซอร์นี้ได้เลยครับ</p>
-              </div>
-            </div>`;
+          window.location.href = "/";
         }
       } catch (err) {
         console.error("Submit error:", err);

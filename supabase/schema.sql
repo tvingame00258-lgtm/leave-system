@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS public.employees (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
+ALTER TABLE public.employees
+    ADD COLUMN IF NOT EXISTS registration_status TEXT NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS approval_role TEXT NOT NULL DEFAULT 'EMPLOYEE',
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT now();
+
 -- Index สำหรับค้นหาพนักงานและหัวหน้า
-CREATE INDEX IF NOT EXISTS idx_employees_line_user_id ON public.employees(line_user_id);
 CREATE INDEX IF NOT EXISTS idx_employees_manager_line_id ON public.employees(manager_line_id);
 CREATE INDEX IF NOT EXISTS idx_employees_company_emp_id ON public.employees(company, employee_id);
 
@@ -47,11 +51,22 @@ CREATE TABLE IF NOT EXISTS public.leave_requests (
     action_by_name TEXT,
     action_date TIMESTAMP WITH TIME ZONE,
     action_reason TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    manager_status TEXT DEFAULT 'PENDING',
+    manager_action_date TIMESTAMP WITH TIME ZONE,
+    gm_status TEXT DEFAULT 'PENDING',
+    gm_action_date TIMESTAMP WITH TIME ZONE,
+    gm_line_id TEXT
 );
 
+ALTER TABLE public.leave_requests
+    ADD COLUMN IF NOT EXISTS manager_status TEXT DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS manager_action_date TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN IF NOT EXISTS gm_status TEXT DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS gm_action_date TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN IF NOT EXISTS gm_line_id TEXT;
+
 -- Index สำหรับค้นหาคำขอลาตามรหัสคำขอและสถานะ
-CREATE INDEX IF NOT EXISTS idx_leave_requests_request_id ON public.leave_requests(request_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_employee ON public.leave_requests(employee_line_id);
 CREATE INDEX IF NOT EXISTS idx_leave_requests_manager_status ON public.leave_requests(manager_line_id, status);
 

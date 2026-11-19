@@ -2,6 +2,118 @@ const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 const DEFAULT_SUPABASE_URL = 'https://tsjfqjisabmbrgbdgyif.supabase.co';
 
+const AUTH_SYNC_SCRIPT = `<script>
+window.LeaveSystemAuth = (() => {
+  const logoutKey = 'line-leave:global-logout';
+  const activeUserKey = 'line-leave:active-user';
+  const pendingLoginKey = 'line-leave:pending-login';
+  const configuredIds = ['__PORTAL_LIFF_ID__', '__REGISTER_LIFF_ID__', '__LEAVE_LIFF_ID__'];
+
+  const isPending = liffId => sessionStorage.getItem(pendingLoginKey) === liffId;
+
+  function syncStorageAcrossLiffIds(fromId) {
+    if (!fromId) return;
+    try {
+      const otherIds = configuredIds.filter(id => id && id !== fromId && !id.startsWith('__'));
+      for (const toId of otherIds) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('LIFF_STORE:' + fromId + ':')) {
+            const sub = k.slice(('LIFF_STORE:' + fromId + ':').length);
+            const val = localStorage.getItem(k);
+            if (val !== null) {
+              const newK = 'LIFF_STORE:' + toId + ':' + sub;
+              const newV = typeof val === 'string' ? val.split(fromId).join(toId) : val;
+              localStorage.setItem(newK, newV);
+            }
+          }
+        }
+      }
+      const rawSessions = localStorage.getItem('test-liff-sessions');
+      if (rawSessions) {
+        try {
+          const sessions = JSON.parse(rawSessions);
+          for (const id of configuredIds) {
+            if (id && !id.startsWith('__')) sessions[id] = true;
+          }
+          localStorage.setItem('test-liff-sessions', JSON.stringify(sessions));
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('LIFF syncStorage failed:', e);
+    }
+  }
+
+  function clearAllLiffSessions() {
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('LIFF_STORE:') || k.startsWith('line-leave:') || k.includes('LIFF_STORE'))) {
+          if (k !== logoutKey) keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      const rawSessions = localStorage.getItem('test-liff-sessions');
+      if (rawSessions) {
+        try {
+          const sessions = JSON.parse(rawSessions);
+          for (const id of configuredIds) {
+            if (id && !id.startsWith('__')) sessions[id] = false;
+          }
+          localStorage.setItem('test-liff-sessions', JSON.stringify(sessions));
+        } catch (e) {}
+      }
+      sessionStorage.clear();
+    } catch (e) {
+      console.warn('clearAllLiffSessions failed:', e);
+    }
+  }
+
+  return {
+    getConfiguredIds() { return configuredIds; },
+    getActiveUser() { return localStorage.getItem(activeUserKey); },
+    shouldBlock(liffId) {
+      return Boolean(localStorage.getItem(logoutKey)) && !isPending(liffId);
+    },
+    beginLogin(liffId) {
+      sessionStorage.setItem(pendingLoginKey, liffId);
+    },
+    completeLogin(liffId, userId) {
+      const pending = isPending(liffId);
+      if (localStorage.getItem(logoutKey) && !pending) return false;
+      if (pending) {
+        sessionStorage.removeItem(pendingLoginKey);
+      }
+      localStorage.removeItem(logoutKey);
+      const activeUser = localStorage.getItem(activeUserKey);
+      if (activeUser && activeUser !== userId) return false;
+      localStorage.setItem(activeUserKey, userId);
+      syncStorageAcrossLiffIds(liffId);
+      return true;
+    },
+    logout() {
+      localStorage.setItem(logoutKey, String(Date.now()));
+      clearAllLiffSessions();
+      try {
+        if (typeof liff !== 'undefined' && liff.isLoggedIn && liff.isLoggedIn()) {
+          liff.logout();
+        }
+      } catch (e) {}
+    }
+  };
+})();
+window.addEventListener('storage', event => {
+  if (event.key !== 'line-leave:global-logout' || !event.newValue) return;
+  try { if (typeof liff !== 'undefined' && liff.isLoggedIn && liff.isLoggedIn()) liff.logout(); } catch (e) {}
+  if (window.location.pathname !== '/') {
+    window.location.assign('/');
+  } else if (typeof showSignedOut === 'function') {
+    showSignedOut();
+  }
+});
+</script>`;
+
 function getSupabaseConfig(env) {
   return {
     url: (env && env.SUPABASE_URL) || DEFAULT_SUPABASE_URL,
@@ -31,14 +143,17 @@ function renderPage(name, env) {
   const html = PAGES[name];
   if (!html) return null;
 
+  const portalId = ((env && env.LIFF_ID_PORTAL) || (typeof LIFF_ID_PORTAL !== 'undefined' ? LIFF_ID_PORTAL : '2011955364-wZgUDTq6')).trim();
   const regId = ((env && env.LIFF_ID_REGISTER) || LIFF_ID_REGISTER).trim();
   const leaveId = ((env && env.LIFF_ID_LEAVE) || LIFF_ID_LEAVE).trim();
+  const ids = {
+    __LIFF_ID__: (name === 'portal') ? portalId : ((name === 'leave') ? leaveId : regId),
+    __PORTAL_LIFF_ID__: portalId,
+    __REGISTER_LIFF_ID__: regId,
+    __LEAVE_LIFF_ID__: leaveId
+  };
 
-  const ids = (name === 'register' || name === 'reject')
-    ? { __LIFF_ID__: regId, __REGISTER_LIFF_ID__: regId }
-    : { __LIFF_ID__: leaveId, __REGISTER_LIFF_ID__: regId };
-
-  let out = html;
+  let out = html.replace('</head>', `${AUTH_SYNC_SCRIPT}</head>`);
   for (const key of Object.keys(ids)) {
     if (!SAFE_ID.test(ids[key])) throw new Error('LIFF ID ไม่ถูกต้อง');
     out = out.split(key).join(ids[key]);
@@ -63,6 +178,22 @@ function formatThaiDate(dateStr) {
     return dMatch[3] + '/' + dMatch[2] + '/' + yearBe;
   }
   return dateStr;
+}
+
+function formatThaiDateTime(isoStr) {
+  if (!isoStr) return '-';
+  try {
+    const d = new Date(isoStr);
+    const bkk = new Date(d.getTime() + (7 * 60 * 60 * 1000));
+    const day = String(bkk.getUTCDate()).padStart(2, '0');
+    const month = String(bkk.getUTCMonth() + 1).padStart(2, '0');
+    const yearBe = bkk.getUTCFullYear() + 543;
+    const hours = String(bkk.getUTCHours()).padStart(2, '0');
+    const minutes = String(bkk.getUTCMinutes()).padStart(2, '0');
+    return `${day}/${month}/${yearBe} ${hours}:${minutes} น.`;
+  } catch (e) {
+    return isoStr;
+  }
 }
 
 function jsonToCsv(rows) {
@@ -119,13 +250,24 @@ async function verifyHmacSignature(message, sig, secret) {
   return safeEqual(expected.toLowerCase(), sig.toLowerCase());
 }
 
+async function verifyApproverLink(payload, env) {
+  const reqId = payload && payload.reqId;
+  const approverLineId = payload && payload.approverLineId;
+  const expiresAt = Number(payload && payload.expiresAt);
+  const now = Math.floor(Date.now() / 1000);
+  if (!reqId || !approverLineId || !Number.isSafeInteger(expiresAt) || expiresAt < now || expiresAt > now + 16 * 60) {
+    return false;
+  }
+  const secret = (env && (env.LINE_CHANNEL_SECRET || env.CHANNEL_SECRET)) || '';
+  return verifyHmacSignature(`${reqId}:${approverLineId}:${expiresAt}`, payload.sig, secret);
+}
+
 async function buildRejectUrl(reqId, approverUid, env) {
   const secret = (env && (env.LINE_CHANNEL_SECRET || env.CHANNEL_SECRET)) || '';
-  if (!secret || !approverUid) {
-    return 'https://line-leave-relay.finnlution.workers.dev/reject?reqId=' + encodeURIComponent(reqId);
-  }
-  const sig = await generateHmacSignature(reqId + ':' + approverUid, secret);
-  return `https://line-leave-relay.finnlution.workers.dev/reject?reqId=${encodeURIComponent(reqId)}&uid=${encodeURIComponent(approverUid)}&sig=${sig}`;
+  if (!secret || !approverUid) return '';
+  const expiresAt = Math.floor(Date.now() / 1000) + 15 * 60;
+  const sig = await generateHmacSignature(`${reqId}:${approverUid}:${expiresAt}`, secret);
+  return `https://line-leave-relay.finnlution.workers.dev/reject?reqId=${encodeURIComponent(reqId)}&uid=${encodeURIComponent(approverUid)}&exp=${expiresAt}&sig=${sig}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +518,91 @@ function buildHrRejectFlex(data) {
   };
 }
 
+function buildApproverConfirmFlex(data) {
+  const isApproved = data.status === 'APPROVED';
+  const color = isApproved ? '#1E3A8A' : '#991B1B';
+  const headerTitle = isApproved
+    ? (data.stage === 'STEP1' ? 'บันทึกการอนุมัติ (ขั้นที่ 1) เรียบร้อย' : 'บันทึกการอนุมัติสมบูรณ์ เรียบร้อย')
+    : 'บันทึกการไม่อนุมัติ เรียบร้อย';
+  const icon = isApproved ? '✅' : '❌';
+
+  const rows = [];
+  if (data.company) rows.push(flexRow('บริษัท:', data.company, true));
+  rows.push(flexRow('ผู้ขอลา:', data.employeeName, true));
+  if (data.department || data.division) {
+    rows.push(flexRow('ฝ่าย/แผนก:', [data.division, data.department].filter(Boolean).join(' / ') || '-'));
+  }
+  rows.push(flexRow('ประเภทการลา:', data.leaveType, true, isApproved ? '#2563EB' : '#DC2626', 'sm'));
+  rows.push(flexRow('ช่วงวันที่ลา:', `${data.startDate} ถึง ${data.endDate} (${data.totalDays} วัน)`, true));
+  rows.push({ type: 'separator', margin: 'md' });
+
+  // Status Badge
+  const statusBadge = isApproved
+    ? (data.stage === 'STEP1' ? 'อนุมัติขั้นที่ 1 แล้ว (ส่งต่อ ผจก.ทั่วไป ⏩)' : 'อนุมัติขั้นสุดท้ายแล้ว (เสร็จสิ้น ✅)')
+    : 'ไม่อนุมัติคำขอ ❌';
+  const statusColor = isApproved ? '#16A34A' : '#DC2626';
+  rows.push(flexRow('ผลการพิจารณา:', statusBadge, true, statusColor, 'sm'));
+
+  if (data.actionByName) {
+    rows.push(flexRow('ผู้ดำเนินการ:', data.actionByName, true));
+  }
+  if (!isApproved && data.actionReason) {
+    rows.push(flexRow('เหตุผลที่ไม่อนุมัติ:', data.actionReason, true, '#DC2626', 'xs'));
+  }
+  if (data.actionDate) {
+    rows.push(flexRow('เวลาที่บันทึก:', data.actionDate));
+  }
+
+  // Next steps / System notification status
+  rows.push({ type: 'separator', margin: 'md' });
+  const footerNote = isApproved
+    ? (data.stage === 'STEP1'
+        ? '⏩ ระบบได้ส่งการ์ดคำขอต่อไปยัง "ผู้จัดการทั่วไป" เพื่อพิจารณาขั้นสุดท้ายแล้ว'
+        : '🎉 การอนุมัติเสร็จสิ้นสมบูรณ์ ระบบได้ส่งแจ้งผลให้พนักงานและฝ่ายบุคคล (HR) เรียบร้อยแล้ว')
+    : '📢 บันทึกผลเรียบร้อย ระบบได้ส่งแจ้งผลการไม่อนุมัติให้พนักงานและฝ่ายบุคคล (HR) ทราบแล้ว';
+
+  return {
+    type: 'flex',
+    altText: `${icon} ${headerTitle}: ${data.requestId}`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: color,
+        paddingAll: '16px',
+        contents: [
+          { type: 'text', text: `${icon} ${headerTitle}`, weight: 'bold', color: '#FFFFFF', size: 'md' },
+          { type: 'text', text: `รหัสคำขอ: ${data.requestId}`, color: '#E0E7FF', size: 'xs', margin: 'xs' }
+        ]
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '16px',
+        contents: rows
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#F8FAFC',
+        paddingAll: '12px',
+        contents: [
+          {
+            type: 'text',
+            text: footerNote,
+            color: '#4B5563',
+            size: 'xxs',
+            wrap: true,
+            align: 'center'
+          }
+        ]
+      }
+    }
+  };
+}
+
 function flexRow(label, value, bold = false, color = '#111827', size = 'xs') {
   return {
     type: 'box',
@@ -487,13 +714,15 @@ function getConfiguredLineIds(env, name) {
 }
 async function getVerifiedLineUserId(idToken, expectedLineUserId, env) {
   if (typeof idToken !== 'string' || !idToken.trim()) return null;
+  const configuredPortalLiffId = (env && env.LIFF_ID_PORTAL) || (typeof LIFF_ID_PORTAL !== 'undefined' ? LIFF_ID_PORTAL : '2011955364-wZgUDTq6');
   const configuredRegLiffId = (env && env.LIFF_ID_REGISTER) || LIFF_ID_REGISTER;
   const configuredLeaveLiffId = (env && env.LIFF_ID_LEAVE) || LIFF_ID_LEAVE;
-  const channelId = ((env && env.LINE_LOGIN_CHANNEL_ID) || configuredRegLiffId.split('-')[0] || '').trim();
+  const channelId = ((env && env.LINE_LOGIN_CHANNEL_ID) || configuredPortalLiffId.split('-')[0] || configuredRegLiffId.split('-')[0] || '').trim();
   if (!/^\d+$/.test(channelId)) return null;
 
   const validChannels = new Set([
     channelId,
+    (configuredPortalLiffId.split('-')[0] || '').trim(),
     (configuredRegLiffId.split('-')[0] || '').trim(),
     (configuredLeaveLiffId.split('-')[0] || '').trim()
   ].filter(id => /^\d+$/.test(id)));
@@ -598,6 +827,15 @@ function isEligibleReportingManager(employee, manager) {
       return isGeneralManager || (manager.division === 'Operate' && manager.company === employee.company);
     }
     return manager.division === 'Support' && manager.department === employee.department;
+  }
+  return false;
+}
+
+function isAssignedApprover(req, lineUserId) {
+  if (!req || !lineUserId) return false;
+  if (req.status === 'PENDING_MANAGER') return req.manager_line_id === lineUserId;
+  if (req.status === 'PENDING_GM') {
+    return (req.gm_line_id || 'U7c04ba211a5fc02c29f834adf9fbc538') === lineUserId;
   }
   return false;
 }
@@ -824,42 +1062,10 @@ async function handleWebhook(request, env, ctx) {
 
   if (!safeEqual(expected, sig)) return new Response('Forbidden', { status: 403 });
 
-  // The Worker owns Supabase approval postbacks. Don't send those same actions
-  // to the legacy GAS handler, which still looks up requests in its old store.
-  const gasBody = removeWorkerHandledApprovalEvents(body);
-  if (env.GAS_URL && gasBody) {
-    ctx.waitUntil(
-      fetch(env.GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: gasBody,
-        redirect: 'follow'
-      }).catch(e => console.log('GAS forward error:', e.message))
-    );
-  }
-
   // Process LINE events in background
   ctx.waitUntil(processLineEvents(body, env));
 
   return new Response('OK', { status: 200 });
-}
-
-function removeWorkerHandledApprovalEvents(rawBody) {
-  try {
-    const payload = JSON.parse(rawBody);
-    if (!Array.isArray(payload.events)) return rawBody;
-    const remainingEvents = payload.events.filter(event => {
-      if (event.type !== 'postback' || !event.postback || !event.postback.data) return true;
-      const action = new URLSearchParams(event.postback.data).get('action');
-      return !['approve', 'reject'].includes(action);
-    });
-    if (remainingEvents.length === payload.events.length) return rawBody;
-    if (remainingEvents.length === 0) return '';
-    return JSON.stringify({ ...payload, events: remainingEvents });
-  } catch (err) {
-    console.warn('Could not filter GAS webhook events; forwarding original body:', err.message);
-    return rawBody;
-  }
 }
 
 async function processLineEvents(rawBody, env) {
@@ -908,8 +1114,18 @@ async function handlePostback(ev, env, token) {
   if (!req) return;
 
   if (action === 'reject') {
+    if (!isAssignedApprover(req, approverUserId)) {
+      if (token && ev.replyToken) {
+        await lineApiCall('reply', token, {
+          replyToken: ev.replyToken,
+          messages: [{ type: 'text', text: '⛔ ขออภัย คุณไม่มีสิทธิ์พิจารณาคำขอนี้' }]
+        });
+      }
+      return;
+    }
     if (token && ev.replyToken) {
       const rejectUrl = await buildRejectUrl(reqId, approverUserId, env);
+      if (!rejectUrl) return;
       await lineApiCall('reply', token, {
         replyToken: ev.replyToken,
         messages: [{
@@ -921,7 +1137,6 @@ async function handlePostback(ev, env, token) {
     return;
   }
 
-  const allowedApprovers = getConfiguredLineIds(env, 'APPROVER_LINE_USER_IDS');
   const nowIso = new Date().toISOString();
 
   const appRes = await supabaseQuery(env, `employees?line_user_id=eq.${encodeURIComponent(approverUserId)}&select=full_name,title`);
@@ -931,7 +1146,7 @@ async function handlePostback(ev, env, token) {
 
   // CASE 1: Step 1 Approval by Department Head / Manager (PENDING_MANAGER -> PENDING_GM)
   if (req.status === 'PENDING_MANAGER') {
-    if (req.manager_line_id !== approverUserId && !allowedApprovers.has(approverUserId)) {
+    if (req.manager_line_id !== approverUserId) {
       if (token && ev.replyToken) {
         await lineApiCall('reply', token, {
           replyToken: ev.replyToken,
@@ -958,12 +1173,24 @@ async function handlePostback(ev, env, token) {
     if (!updateRes.ok) return;
 
     if (token && ev.replyToken) {
+      const confirmFlex = buildApproverConfirmFlex({
+        requestId: reqId,
+        company: req.company,
+        employeeName: req.employee_name,
+        division: req.division,
+        department: req.department,
+        leaveType: req.leave_type + (req.other_leave_detail ? ` (${req.other_leave_detail})` : ''),
+        startDate: req.start_date,
+        endDate: req.end_date,
+        totalDays: req.total_days,
+        status: 'APPROVED',
+        stage: 'STEP1',
+        actionByName: approverName,
+        actionDate: formatThaiDateTime(nowIso)
+      });
       await lineApiCall('reply', token, {
         replyToken: ev.replyToken,
-        messages: [{
-          type: 'text',
-          text: `บันทึกผลการอนุมัติ (ขั้นที่ 1: หัวหน้างาน) เรียบร้อยแล้ว ✅\n\n📋 รหัสคำขอ: ${reqId}\n👤 พนักงาน: ${req.employee_name}\n📅 วันที่ลา: ${req.start_date} ถึง ${req.end_date}\n\nระบบได้ส่งคำขอต่อไปยัง 'ผู้จัดการทั่วไป' เพื่อพิจารณาขั้นสุดท้ายแล้วครับ`
-        }]
+        messages: [confirmFlex]
       });
     }
 
@@ -1006,7 +1233,8 @@ async function handlePostback(ev, env, token) {
 
   // CASE 2: Step 2 Approval by General Manager (PENDING_GM -> APPROVED)
   if (req.status === 'PENDING_GM') {
-    const isGm = (req.gm_line_id && req.gm_line_id === approverUserId) || allowedApprovers.has(approverUserId);
+    const gmTarget = req.gm_line_id || 'U7c04ba211a5fc02c29f834adf9fbc538';
+    const isGm = gmTarget === approverUserId;
     if (!isGm) {
       if (token && ev.replyToken) {
         await lineApiCall('reply', token, {
@@ -1035,12 +1263,24 @@ async function handlePostback(ev, env, token) {
     if (!updateRes.ok) return;
 
     if (token && ev.replyToken) {
+      const confirmFlex = buildApproverConfirmFlex({
+        requestId: reqId,
+        company: req.company,
+        employeeName: req.employee_name,
+        division: req.division,
+        department: req.department,
+        leaveType: req.leave_type + (req.other_leave_detail ? ` (${req.other_leave_detail})` : ''),
+        startDate: req.start_date,
+        endDate: req.end_date,
+        totalDays: req.total_days,
+        status: 'APPROVED',
+        stage: 'FINAL',
+        actionByName: approverName,
+        actionDate: formatThaiDateTime(nowIso)
+      });
       await lineApiCall('reply', token, {
         replyToken: ev.replyToken,
-        messages: [{
-          type: 'text',
-          text: `อนุมัติคำขอลาเรียบร้อยแล้ว ✅ (อนุมัติสมบูรณ์)\n\n📋 รหัสคำขอ: ${reqId}\n👤 พนักงาน: ${req.employee_name}\n📅 วันที่ลา: ${req.start_date} ถึง ${req.end_date}\n\nระบบได้แจ้งผลไปยังพนักงานและฝ่ายบุคคล (HR) เรียบร้อยแล้วครับ`
-        }]
+        messages: [confirmFlex]
       });
     }
 
@@ -1097,12 +1337,15 @@ async function handlePostback(ev, env, token) {
   }
 }
 
-async function handleGetLeaveRequestDetail(env, reqId) {
+async function handleGetLeaveRequestDetail(env, reqId, approverLineId) {
   if (!reqId) return null;
-  const res = await supabaseQuery(env, `leave_requests?request_id=eq.${encodeURIComponent(reqId)}&select=request_id,employee_name,leave_type,start_date,end_date,total_days,reason,company,department,status`);
+  const res = await supabaseQuery(env, `leave_requests?request_id=eq.${encodeURIComponent(reqId)}&select=request_id,employee_name,leave_type,start_date,end_date,total_days,reason,company,department,status,manager_line_id,gm_line_id`);
   if (!res.ok) return null;
   const list = await res.json();
-  return list && list[0] ? list[0] : null;
+  const req = list && list[0];
+  if (!isAssignedApprover(req, approverLineId)) return null;
+  const { manager_line_id, gm_line_id, ...safeRequest } = req;
+  return safeRequest;
 }
 
 async function handleRejectLeaveRequest(env, payload) {
@@ -1119,11 +1362,10 @@ async function handleRejectLeaveRequest(env, payload) {
   const req = list && list[0];
   if (!req) return { success: false, message: 'ไม่พบคำขอลา' };
 
-  if (req.status === 'APPROVED' || req.status === 'REJECTED') {
-    return { success: false, message: `คำขอนี้ได้รับการพิจารณาไปแล้ว (สถานะ: ${req.status})` };
-  }
-
   const approverUserId = payload.approverLineId || '';
+  if (!isAssignedApprover(req, approverUserId)) {
+    return { success: false, forbidden: true, message: 'คุณไม่มีสิทธิ์พิจารณาคำขอนี้' };
+  }
   const nowIso = new Date().toISOString();
 
   let approverName = 'หัวหน้างาน / ผู้จัดการทั่วไป';
@@ -1207,6 +1449,29 @@ async function handleRejectLeaveRequest(env, payload) {
     }
   }
 
+  // Notify Approver via LINE with confirmation flex card
+  if (token && approverUserId) {
+    const confirmRejectFlex = buildApproverConfirmFlex({
+      requestId: reqId,
+      company: req.company,
+      employeeName: req.employee_name,
+      division: req.division,
+      department: req.department,
+      leaveType: req.leave_type + (req.other_leave_detail ? ` (${req.other_leave_detail})` : ''),
+      startDate: req.start_date,
+      endDate: req.end_date,
+      totalDays: req.total_days,
+      status: 'REJECTED',
+      actionByName: approverName,
+      actionReason: reason,
+      actionDate: formatThaiDateTime(nowIso)
+    });
+    await lineApiCall('push', token, {
+      to: approverUserId,
+      messages: [confirmRejectFlex]
+    });
+  }
+
   return { success: true, message: 'บันทึกการไม่อนุมัติและแจ้งผลเรียบร้อยแล้ว' };
 }
 
@@ -1220,7 +1485,7 @@ async function handleApi(request, env, ctx) {
   if (!body || typeof body.fn !== 'string' || !Array.isArray(body.args)) return jsonResponse({ ok: false, error: 'bad request' }, 400);
 
   const fn = body.fn;
-  const allowed = ['getRegisterPageData', 'getEmployeeProfile', 'registerEmployee', 'submitLeaveRequest', 'getLeaveRequestDetail', 'rejectLeaveRequest'];
+  const allowed = ['getRegisterPageData', 'getEmployeeProfile', 'registerEmployee', 'submitLeaveRequest', 'getLeaveRequestDetail', 'rejectLeaveRequest', 'exportHr'];
   if (!allowed.includes(fn)) return jsonResponse({ ok: false, error: 'unknown function' }, 400);
   let idToken = '';
   let expectedLineUserId = '';
@@ -1231,24 +1496,19 @@ async function handleApi(request, env, ctx) {
   } else if (payload && typeof payload === 'object') {
     if (fn === 'registerEmployee') {
       expectedLineUserId = payload.lineUserId;
-    } else if (fn === 'rejectLeaveRequest') {
+    } else if (fn === 'rejectLeaveRequest' || fn === 'getLeaveRequestDetail') {
       expectedLineUserId = payload.approverLineId || '';
+    } else if (fn === 'exportHr') {
+      expectedLineUserId = payload.lineUserId || '';
     } else {
       expectedLineUserId = payload.employeeLineId;
     }
     idToken = payload.idToken;
   }
-  if (fn === 'getLeaveRequestDetail') {
-    const reqId = body.args[0];
-    const result = await handleGetLeaveRequestDetail(env, reqId);
-    return jsonResponse({ ok: true, result }, 200);
-  }
 
   let verifiedLineUserId = null;
-  if (fn === 'rejectLeaveRequest' && payload && payload.sig && payload.approverLineId && payload.reqId) {
-    const secret = (env && (env.LINE_CHANNEL_SECRET || env.CHANNEL_SECRET)) || '';
-    const isValid = await verifyHmacSignature(payload.reqId + ':' + payload.approverLineId, payload.sig, secret);
-    if (isValid) {
+  if ((fn === 'rejectLeaveRequest' || fn === 'getLeaveRequestDetail') && await verifyApproverLink(payload, env)) {
+    if (payload.approverLineId) {
       verifiedLineUserId = payload.approverLineId;
     }
   }
@@ -1259,16 +1519,57 @@ async function handleApi(request, env, ctx) {
   if (!verifiedLineUserId) return jsonResponse({ ok: false, error: 'LINE authentication required' }, 401);
   try {
     let result;
+    if (fn === 'getLeaveRequestDetail') {
+      result = await handleGetLeaveRequestDetail(env, payload && payload.reqId, verifiedLineUserId);
+      if (!result) return jsonResponse({ ok: false, error: 'forbidden' }, 403);
+      return jsonResponse({ ok: true, result }, 200);
+    }
+    if (fn === 'exportHr') {
+      if (!getConfiguredLineIds(env, 'HR_LINE_USER_IDS').has(verifiedLineUserId)) {
+        return jsonResponse({ ok: false, error: 'forbidden' }, 403);
+      }
+      return await buildHrCsvResponse(env);
+    }
     if (fn === 'getRegisterPageData') result = await handleGetRegisterPageData(env, verifiedLineUserId);
     else if (fn === 'getEmployeeProfile') result = await handleGetEmployeeProfile(env, verifiedLineUserId);
     else if (fn === 'registerEmployee') result = await handleRegisterEmployee(env, { ...payload, lineUserId: verifiedLineUserId });
     else if (fn === 'submitLeaveRequest') result = await handleSubmitLeaveRequest(env, { ...payload, employeeLineId: verifiedLineUserId });
-    else if (fn === 'rejectLeaveRequest') result = await handleRejectLeaveRequest(env, { ...payload, approverLineId: verifiedLineUserId });
+    else if (fn === 'rejectLeaveRequest') {
+      result = await handleRejectLeaveRequest(env, { ...payload, approverLineId: verifiedLineUserId });
+      if (result && result.forbidden) return jsonResponse({ ok: false, error: result.message }, 403);
+    }
     return jsonResponse({ ok: true, result }, 200);
   } catch (err) {
     console.error(`API Error in ${fn}:`, err.message);
     return jsonResponse({ ok: false, error: 'request failed' }, 500);
   }
+}
+
+async function buildHrCsvResponse(env) {
+  const sb = getSupabaseConfig(env);
+  const res = await fetch(`${sb.url}/rest/v1/hr_overview?select=*`, {
+    headers: getSupabaseHeaders(sb.key)
+  });
+  if (!res.ok) return new Response('Error loading HR report', { status: 500 });
+  const rows = await res.json();
+  const formattedRows = (rows || []).map(r => {
+    const rowCopy = { ...r };
+    ['วันที่ลงบันทึกการขอลา', 'วันที่ลาใช้สิทธิ', 'วันที่พิจารณา'].forEach(k => {
+      if (rowCopy[k]) rowCopy[k] = formatThaiDate(rowCopy[k]);
+    });
+    if (rowCopy['ชื่อ-สกุล']) {
+      rowCopy['ชื่อ-สกุล'] = rowCopy['ชื่อ-สกุล'].replace(/^(\S+)\s+\1\s+/, '$1 ');
+    }
+    return rowCopy;
+  });
+  return new Response(jsonToCsv(formattedRows), {
+    status: 200,
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': 'attachment; filename="leave_summary.csv"',
+      'cache-control': 'no-store'
+    }
+  });
 }
 // ---------------------------------------------------------------------------
 // Router
@@ -1279,35 +1580,8 @@ export default {
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
     if (request.method === 'GET' || request.method === 'HEAD') {
-      if (path === '/export-hr' || path === '/api/export-hr') {
-        const sb = getSupabaseConfig(env);
-        const res = await fetch(`${sb.url}/rest/v1/hr_overview?select=*`, {
-          headers: getSupabaseHeaders(sb.key)
-        });
-        if (!res.ok) {
-          return new Response('Error loading data from Supabase: ' + res.status, { status: 500 });
-        }
-        const rows = await res.json();
-        const formattedRows = (rows || []).map(r => {
-          const rowCopy = { ...r };
-          ['วันที่ลงบันทึกการขอลา', 'วันที่ลาใช้สิทธิ', 'วันที่พิจารณา'].forEach(k => {
-            if (rowCopy[k]) rowCopy[k] = formatThaiDate(rowCopy[k]);
-          });
-          // Clean up duplicate title prefix if present (e.g. "นาย นาย ...")
-          if (rowCopy['ชื่อ-สกุล']) {
-            rowCopy['ชื่อ-สกุล'] = rowCopy['ชื่อ-สกุล'].replace(/^(\S+)\s+\1\s+/, '$1 ');
-          }
-          return rowCopy;
-        });
-        const csv = jsonToCsv(formattedRows);
-        return new Response(csv, {
-          status: 200,
-          headers: {
-            'content-type': 'text/csv; charset=utf-8',
-            'content-disposition': 'inline; filename="leave_summary.csv"',
-            'cache-control': 'no-store'
-          }
-        });
+      if (path === '/api/export-hr') {
+        return jsonResponse({ ok: false, error: 'LINE authentication required' }, 401);
       }
 
       if (path === '/ping') {
@@ -1331,7 +1605,8 @@ export default {
           ? 'leave'
           : (path === '/reject'
             ? 'reject'
-            : (path === '/' || path === '/portal' ? 'portal' : null)));
+            : (path === '/export-hr' ? 'hrReport'
+              : (path === '/' || path === '/portal' ? 'portal' : null))));
       if (name) {
         return new Response(renderPage(name, env), {
           status: 200,

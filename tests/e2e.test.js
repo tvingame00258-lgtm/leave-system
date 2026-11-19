@@ -6,7 +6,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE_URL = 'https://line-leave-relay.finnlution.workers.dev';
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://line-leave-relay.finnlution.workers.dev';
 
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 };
 const MOBILE_VIEWPORT = { width: 375, height: 812 };
@@ -40,14 +40,11 @@ async function testPingEndpoint() {
 }
 
 async function testExportHrEndpoint() {
-  console.log('\n📊 Test 2: Export HR CSV Endpoint');
+  console.log('\n🔒 Test 2: HR CSV is not publicly accessible');
   const res = await fetch(`${BASE_URL}/export-hr`);
   const text = await res.text();
-  await assert('Status HTTP 200', res.status === 200);
-  await assert('Content-Type = text/csv', res.headers.get('content-type').includes('text/csv'));
-  await assert('CSV มีหัวตาราง "บริษัท"', text.includes('บริษัท'));
-  await assert('CSV มีหัวตาราง "เหตุผลที่ไม่อนุมัติ"', text.includes('เหตุผลที่ไม่อนุมัติ'));
-  await assert('CSV มีรูปแบบวันที่ พ.ศ.', text.includes('/2569') || text.includes('/2570'));
+  await assert('ไม่มีการยืนยันตัวตนแล้วได้ HTTP 401', res.status === 401);
+  await assert('ไม่ส่งข้อมูล CSV ออกมา', !text.includes('ชื่อ-สกุล') && !text.includes('เหตุผลการลา'));
 }
 
 async function testRegisterPage(browser, viewportName, viewport) {
@@ -106,6 +103,7 @@ async function testRejectPage(browser, viewportName, viewport) {
   await assert(`[${viewportName}] แสดงรหัสคำขอ TEST-001`, (await page.locator('#displayReqId').textContent()) === 'TEST-001');
   await assert(`[${viewportName}] มีข้อความ "เหตุผลที่ไม่อนุมัติ"`, (await page.content()).includes('เหตุผลที่ไม่อนุมัติ'));
   await assert(`[${viewportName}] มี liff.login() สำหรับ PC auto-login`, (await page.content()).includes('liff.login('));
+  await assert(`[${viewportName}] ซ่อนฟอร์มเมื่อไม่มีลิงก์ที่ลงนาม`, !(await page.locator('#rejectForm').isVisible()));
 
   await context.close();
 }

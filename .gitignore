@@ -1,6 +1,9 @@
 node_modules/
 .wrangler/
 .env
+.dev.vars
+playwright-report/
+test-results/
 .DS_Store
 Thumbs.db
 *.zip
