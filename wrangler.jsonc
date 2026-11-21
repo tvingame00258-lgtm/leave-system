@@ -11,9 +11,13 @@
     "ALLOW_ROOT_MANAGER_REGISTRATION": "false",
     "APPROVER_LINE_USER_IDS": "U7c04ba211a5fc02c29f834adf9fbc538",
     "HR_LINE_USER_IDS": "U7c04ba211a5fc02c29f834adf9fbc538",
+    "GM_LINE_USER_ID": "U7c04ba211a5fc02c29f834adf9fbc538",
     "LIFF_ID_PORTAL": "2011955364-wZgUDTq6",
     "LIFF_ID_REGISTER": "2011955364-O2qTmo0r",
     "LIFF_ID_LEAVE": "2011955364-FCY27ABh"
+  },
+  "placement": {
+    "mode": "smart"
   },
   "triggers": {
     "crons": [
@@ -22,6 +26,10 @@
   },
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
   }
 }

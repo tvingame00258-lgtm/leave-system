@@ -2,7 +2,7 @@ const http = require('node:http');
 
 const SECRET = 'playwright-test-line-secret';
 const PORT = 4173;
-const state = { patches: [], lineMessages: [] };
+const state = { patches: [], inserts: [], lineMessages: [], patchedReqIds: new Set() };
 const env = {
   SUPABASE_URL: 'https://supabase.test.local',
   SUPABASE_SECRET_KEY: 'test-supabase-key',
@@ -68,16 +68,33 @@ globalThis.fetch = async (input, init = {}) => {
 
   if (url.hostname === 'supabase.test.local') {
     if (url.pathname.endsWith('/hr_overview')) {
-      return jsonResponse([{
-        'บริษัท': 'บริษัททดสอบ',
-        'ชื่อ-สกุล': 'ทดสอบ ระบบ',
-        'เหตุผลการลา': 'ข้อมูลเฉพาะ HR'
-      }]);
+      return jsonResponse([
+        {
+          'บริษัท': 'บริษัททดสอบ',
+          'ชื่อ-สกุล': 'ทดสอบ ระบบ',
+          'รายละเอียดเพิ่มเติม': '=SUM(A1:A2)',
+          'เหตุผลการลา': 'ข้อมูลเฉพาะ HR'
+        },
+        {
+          'บริษัท': 'บริษัททดสอบ',
+          'ชื่อ-สกุล': '+Admin',
+          'รายละเอียดเพิ่มเติม': '-1+1',
+          'เหตุผลการลา': '@IMPORT'
+        }
+      ]);
     }
     if (url.pathname.endsWith('/leave_requests')) {
       const reqId = (url.searchParams.get('request_id') || '').replace(/^eq\./, '');
+      if (init.method === 'POST') {
+        state.inserts.push(init.body || '');
+        return jsonResponse([JSON.parse(init.body || '{}')], 201);
+      }
       if (init.method === 'PATCH') {
-        state.patches.push({ reqId, body: init.body || '' });
+        state.patches.push({ reqId, search: url.search, body: init.body || '' });
+        if (state.patchedReqIds.has(reqId)) {
+          return jsonResponse([]);
+        }
+        state.patchedReqIds.add(reqId);
         return jsonResponse([{ request_id: reqId }]);
       }
       return jsonResponse([leaveRequest(reqId)]);
@@ -87,7 +104,18 @@ globalThis.fetch = async (input, init = {}) => {
       if (url.searchParams.has('select') && url.searchParams.get('select') === 'count') {
         return new Response('', { status: 200, headers: { 'content-range': '0-0/0' } });
       }
-      return jsonResponse(userId ? [{ line_user_id: userId, full_name: userId, title: '' }] : []);
+      return jsonResponse(userId ? [{
+        line_user_id: userId,
+        full_name: userId,
+        title: '',
+        company: 'บริษัททดสอบ',
+        division: 'Operate',
+        department: 'ระบบติดตามหนี้',
+        position: userId === 'MANAGER-1' ? 'Manager' : 'พนักงาน',
+        manager_line_id: userId === 'EMPLOYEE-1' ? 'MANAGER-1' : null,
+        approval_role: userId === 'MANAGER-1' ? 'MANAGER' : 'EMPLOYEE',
+        registration_status: 'ACTIVE'
+      }] : []);
     }
   }
 
@@ -100,13 +128,19 @@ globalThis.fetch = async (input, init = {}) => {
     const url = new URL(incoming.url, `http://${incoming.headers.host}`);
     if (url.pathname === '/__test/reset') {
       state.patches.length = 0;
+      state.inserts.length = 0;
       state.lineMessages.length = 0;
+      state.patchedReqIds.clear();
       outgoing.writeHead(204).end();
       return;
     }
     if (url.pathname === '/__test/state') {
       outgoing.writeHead(200, { 'content-type': 'application/json' });
-      outgoing.end(JSON.stringify(state));
+      outgoing.end(JSON.stringify({
+        patches: state.patches,
+        inserts: state.inserts,
+        lineMessages: state.lineMessages
+      }));
       return;
     }
     if (url.pathname === '/__test/stop') {

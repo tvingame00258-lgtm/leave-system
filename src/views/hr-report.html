@@ -27,16 +27,22 @@
     const LIFF_ID = "__LIFF_ID__";
     const statusEl = document.getElementById('hrReportStatus');
     const button = document.getElementById('downloadLink');
+    let cachedCsvBlob = null;
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
-        const profile = await liff.getProfile();
-        const response = await fetch('/api', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })
-        });
-        if (!response.ok) throw new Error(response.status === 403 ? 'บัญชี LINE นี้ไม่มีสิทธิ์ดาวน์โหลดรายงาน HR' : 'ยืนยันตัวตนไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่');
-        const fileUrl = URL.createObjectURL(await response.blob());
+        let csvBlob = cachedCsvBlob;
+        if (!csvBlob) {
+          const profile = await liff.getProfile();
+          const response = await fetch('/api', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })
+          });
+          if (!response.ok) throw new Error(response.status === 403 ? 'บัญชี LINE นี้ไม่มีสิทธิ์ดาวน์โหลดรายงาน HR' : 'ยืนยันตัวตนไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่');
+          csvBlob = await response.blob();
+          cachedCsvBlob = csvBlob;
+        }
+        const fileUrl = URL.createObjectURL(csvBlob);
         const link = document.createElement('a'); link.href = fileUrl; link.download = 'leave_summary.csv'; link.click();
         setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
       } catch (error) {
@@ -59,6 +65,7 @@
           body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })
         });
         if (!response.ok) throw new Error(response.status === 403 ? 'บัญชี LINE นี้ไม่มีสิทธิ์ดาวน์โหลดรายงาน HR' : 'ยืนยันตัวตนไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่');
+        cachedCsvBlob = await response.blob();
         statusEl.textContent = 'ยืนยันสิทธิ์ HR แล้ว พร้อมดาวน์โหลดรายงาน'; statusEl.className = 'ok'; button.hidden = false;
       } catch (error) {
         statusEl.textContent = error.message || 'ตรวจสอบสิทธิ์ไม่สำเร็จ'; statusEl.className = 'denied';

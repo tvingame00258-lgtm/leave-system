@@ -295,3 +295,178 @@ test('shared login connects portal cards and allows seamless navigation to leave
   await expect(page.locator('#empNameDisplay')).toContainText('EMPLOYEE-1');
   await expect(page.locator('#leaveForm')).toBeVisible();
 });
+
+test('duplicate postback approval does not send duplicate push notifications', async ({ request }) => {
+  const payload = JSON.stringify({
+    events: [{
+      type: 'postback',
+      replyToken: 'reply-token',
+      postback: { data: 'action=approve&reqId=LV-DUP-1' },
+      source: { type: 'user', userId: 'MANAGER-1' }
+    }]
+  });
+  const signature = createHmac('sha256', SECRET).update(payload).digest('base64');
+
+  const first = await request.post('/webhook', {
+    data: payload,
+    headers: { 'x-line-signature': signature, 'content-type': 'application/json' }
+  });
+  expect(first.status()).toBe(200);
+
+  const afterFirst = await (await request.get('/__test/state')).json();
+  const pushCountAfterFirst = afterFirst.lineMessages.filter(m => m.path.endsWith('/push')).length;
+  expect(pushCountAfterFirst).toBe(2);
+
+  const second = await request.post('/webhook', {
+    data: payload,
+    headers: { 'x-line-signature': signature, 'content-type': 'application/json' }
+  });
+  expect(second.status()).toBe(200);
+
+  const afterSecond = await (await request.get('/__test/state')).json();
+  const pushCountAfterSecond = afterSecond.lineMessages.filter(m => m.path.endsWith('/push')).length;
+  expect(pushCountAfterSecond).toBe(pushCountAfterFirst);
+  const lastReply = afterSecond.lineMessages.filter(m => m.path.endsWith('/reply')).pop();
+  expect(lastReply.body).toContain('ดำเนินการไปแล้ว');
+});
+
+test('rejectLeaveRequest sends actionReason to employee and checks status in PATCH', async ({ request }) => {
+  const response = await request.post('/api', {
+    data: {
+      fn: 'rejectLeaveRequest',
+      args: [{
+        reqId: 'LV-REJECT-REASON',
+        reason: 'ช่วงปิดงบไม่สามารถลาได้',
+        approverLineId: 'MANAGER-1',
+        idToken: 'valid-manager-token'
+      }]
+    }
+  });
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(body.ok).toBe(true);
+  expect(body.result.success).toBe(true);
+
+  const state = await (await request.get('/__test/state')).json();
+  expect(state.patches).toHaveLength(1);
+  expect(state.patches[0].search).toContain('status=eq.PENDING_MANAGER');
+  const employeePush = state.lineMessages.find(m => m.path.endsWith('/push') && JSON.parse(m.body).to === 'EMPLOYEE-1');
+  expect(employeePush).toBeTruthy();
+  expect(employeePush.body).toContain('ช่วงปิดงบไม่สามารถลาได้');
+
+  // Second rejection attempt on same request must not send notifications again
+  const second = await request.post('/api', {
+    data: {
+      fn: 'rejectLeaveRequest',
+      args: [{
+        reqId: 'LV-REJECT-REASON',
+        reason: 'ซ้ำ',
+        approverLineId: 'MANAGER-1',
+        idToken: 'valid-manager-token'
+      }]
+    }
+  });
+  expect(second.status()).toBe(200);
+  const secondBody = await second.json();
+  expect(secondBody.result.success).toBe(false);
+});
+
+test('HR CSV export neutralizes formula injection prefixes', async ({ request }) => {
+  const hr = await request.post('/api', {
+    data: { fn: 'exportHr', args: [{ lineUserId: 'HR-1', idToken: 'valid-hr-token' }] }
+  });
+  expect(hr.status()).toBe(200);
+  const csv = await hr.text();
+  expect(csv).toContain("'=SUM(A1:A2)");
+  expect(csv).toContain("'+Admin");
+  expect(csv).toContain("'-1+1");
+  expect(csv).toContain("'@IMPORT");
+});
+
+test('submitLeaveRequest validates dates, totalDays, and reason on backend', async ({ request }) => {
+  const badDateOrder = await request.post('/api', {
+    data: {
+      fn: 'submitLeaveRequest',
+      args: [{
+        employeeLineId: 'EMPLOYEE-1',
+        idToken: 'valid-employee-token',
+        leaveType: 'ลาป่วย',
+        startDate: '2026-11-25',
+        endDate: '2026-11-20',
+        totalDays: 1,
+        reason: 'ป่วย'
+      }]
+    }
+  });
+  expect((await badDateOrder.json()).result.success).toBe(false);
+
+  const badDays = await request.post('/api', {
+    data: {
+      fn: 'submitLeaveRequest',
+      args: [{
+        employeeLineId: 'EMPLOYEE-1',
+        idToken: 'valid-employee-token',
+        leaveType: 'ลาป่วย',
+        startDate: '2026-11-20',
+        endDate: '2026-11-20',
+        totalDays: -2,
+        reason: 'ป่วย'
+      }]
+    }
+  });
+  expect((await badDays.json()).result.success).toBe(false);
+
+  const emptyReason = await request.post('/api', {
+    data: {
+      fn: 'submitLeaveRequest',
+      args: [{
+        employeeLineId: 'EMPLOYEE-1',
+        idToken: 'valid-employee-token',
+        leaveType: 'ลาป่วย',
+        startDate: '2026-11-20',
+        endDate: '2026-11-20',
+        totalDays: 1,
+        reason: '   '
+      }]
+    }
+  });
+  expect((await emptyReason.json()).result.success).toBe(false);
+
+  const valid = await request.post('/api', {
+    data: {
+      fn: 'submitLeaveRequest',
+      args: [{
+        employeeLineId: 'EMPLOYEE-1',
+        idToken: 'valid-employee-token',
+        leaveType: 'ลาป่วย',
+        startDate: '2026-11-20',
+        endDate: '2026-11-20',
+        totalDays: 1,
+        reason: 'ป่วย'
+      }]
+    }
+  });
+  const validJson = await valid.json();
+  expect(validJson.result.success).toBe(true);
+  expect(validJson.result.requestId).toMatch(/^LV-\d{8}-\d{6}$/);
+});
+
+test('HR report page fetches exportHr only once across load and download', async ({ page }) => {
+  await page.route('https://static.line-scdn.net/liff/edge/2/sdk.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: 'window.liff={init:async()=>{},isLoggedIn:()=>true,login:()=>{},getIDToken:()=>"valid-hr-token",getProfile:async()=>({userId:"HR-1"})};'
+  }));
+  let exportApiCalls = 0;
+  page.on('request', req => {
+    if (req.url().endsWith('/api') && req.method() === 'POST' && (req.postData() || '').includes('"exportHr"')) {
+      exportApiCalls++;
+    }
+  });
+  await page.goto('/export-hr');
+  await expect(page.locator('#hrReportStatus')).toContainText(/ยืนยันสิทธิ์ HR แล้ว/i);
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#downloadLink').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('leave_summary.csv');
+  expect(exportApiCalls).toBe(1);
+});

@@ -2,6 +2,7 @@
   "name": "line-leave-relay",
   "version": "1.0.0",
   "description": "ระบบลางานและอนุมัติผ่าน LINE โดยเชื่อมต่อ Cloudflare Worker และ Supabase",
+  "type": "module",
   "main": "worker.js",
   "scripts": {
     "build": "node build.js",

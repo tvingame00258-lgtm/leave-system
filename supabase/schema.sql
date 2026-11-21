@@ -73,29 +73,33 @@ CREATE INDEX IF NOT EXISTS idx_leave_requests_manager_status ON public.leave_req
 -- 3. View สำหรับฝ่ายบุคคล (hr_overview)
 CREATE OR REPLACE VIEW public.hr_overview WITH (security_invoker = true) AS
 SELECT 
-    company AS "บริษัท",
-    to_char((created_at AT TIME ZONE 'Asia/Bangkok'), 'YYYY-MM-DD HH24:MI:SS') AS "วันที่ลงบันทึกการขอลา",
-    (SELECT e.employee_id FROM public.employees e WHERE e.line_user_id = leave_requests.employee_line_id LIMIT 1) AS "รหัสพนักงาน",
-    (SELECT e.title FROM public.employees e WHERE e.line_user_id = leave_requests.employee_line_id LIMIT 1) AS "คำนำหน้า",
-    employee_name AS "ชื่อ-สกุล",
-    division AS "ฝ่าย",
-    department AS "แผนก",
-    position AS "ตำแหน่ง",
-    leave_type AS "ประเภทการลา",
-    other_leave_detail AS "รายละเอียดเพิ่มเติม",
+    lr.company AS "บริษัท",
+    to_char((lr.created_at AT TIME ZONE 'Asia/Bangkok'), 'YYYY-MM-DD HH24:MI:SS') AS "วันที่ลงบันทึกการขอลา",
+    emp.employee_id AS "รหัสพนักงาน",
+    emp.title AS "คำนำหน้า",
+    lr.employee_name AS "ชื่อ-สกุล",
+    lr.division AS "ฝ่าย",
+    lr.department AS "แผนก",
+    lr.position AS "ตำแหน่ง",
+    lr.leave_type AS "ประเภทการลา",
+    lr.other_leave_detail AS "รายละเอียดเพิ่มเติม",
     CASE
-        WHEN start_date = end_date THEN to_char(start_date::timestamp with time zone, 'YYYY-MM-DD')
-        ELSE (to_char(start_date::timestamp with time zone, 'YYYY-MM-DD') || ' ถึง ') || to_char(end_date::timestamp with time zone, 'YYYY-MM-DD')
+        WHEN lr.start_date = lr.end_date THEN to_char(lr.start_date, 'YYYY-MM-DD')
+        ELSE (to_char(lr.start_date, 'YYYY-MM-DD') || ' ถึง ') || to_char(lr.end_date, 'YYYY-MM-DD')
     END AS "วันที่ลาใช้สิทธิ",
-    total_days AS "จำนวนวันลา",
-    reason AS "เหตุผลการลา",
-    (SELECT e.full_name FROM public.employees e WHERE e.line_user_id = leave_requests.manager_line_id LIMIT 1) AS "หัวหน้าผู้อนุมัติ",
+    lr.total_days AS "จำนวนวันลา",
+    lr.reason AS "เหตุผลการลา",
+    mgr.full_name AS "หัวหน้าผู้อนุมัติ",
     CASE
-        WHEN status = 'APPROVED' THEN 'ได้'
-        WHEN status = 'REJECTED' THEN 'ไม่ได้'
+        WHEN lr.status = 'APPROVED' THEN 'ได้'
+        WHEN lr.status = 'REJECTED' THEN 'ไม่ได้'
+        WHEN lr.status = 'PENDING_GM' THEN 'รอผู้จัดการทั่วไป'
         ELSE 'รอพิจารณา'
     END AS "สถานะการได้ลา",
-    action_by_name AS "ผู้อนุมัติ",
-    to_char((action_date AT TIME ZONE 'Asia/Bangkok'), 'YYYY-MM-DD HH24:MI:SS') AS "วันที่พิจารณา"
-FROM public.leave_requests
-ORDER BY created_at DESC;
+    lr.action_by_name AS "ผู้อนุมัติ",
+    to_char((lr.action_date AT TIME ZONE 'Asia/Bangkok'), 'YYYY-MM-DD HH24:MI:SS') AS "วันที่พิจารณา",
+    lr.action_reason AS "เหตุผลที่ไม่อนุมัติ"
+FROM public.leave_requests lr
+LEFT JOIN public.employees emp ON emp.line_user_id = lr.employee_line_id
+LEFT JOIN public.employees mgr ON mgr.line_user_id = lr.manager_line_id
+ORDER BY lr.created_at DESC;

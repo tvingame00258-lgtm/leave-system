@@ -1,5 +1,8 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const regHtml = fs.readFileSync(path.join(__dirname, 'src/views/register.html'), 'utf8');
 const leaveHtml = fs.readFileSync(path.join(__dirname, 'src/views/leave.html'), 'utf8');

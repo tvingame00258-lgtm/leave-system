@@ -231,7 +231,7 @@
   </div>
 
   <div class="text-center text-xs text-gray-400 mt-6">
-    ระบบลาและอนุมัติงาน &bull; ขับเคลื่อนด้วย Google Sheets &amp; LINE LIFF
+    ระบบลาและอนุมัติงาน &bull; ขับเคลื่อนด้วย Supabase &amp; LINE LIFF
   </div>
 
   <script>
@@ -379,13 +379,29 @@ function showLiffProblem(title, detail, login = false) {
       <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
       ${login ? `
         <div class="text-center mt-3">
-          <button type="button" onclick="try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
+          <button type="button" onclick="try { sessionStorage.removeItem('line-leave:reauth-retry:' + LIFF_ID); } catch(e){}; window.LeaveSystemAuth?.beginLogin(LIFF_ID); try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
                   class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow">
             <i class="fa-solid fa-arrow-rotate-right mr-1"></i> เข้าสู่ระบบ LINE ใหม่อีกครั้ง
           </button>
         </div>` : ""}
       <pre class="text-[10px] text-gray-400 mt-3 whitespace-pre-wrap break-all bg-gray-50 p-2 rounded">${escapeHtml(JSON.stringify(liffDiag(), null, 2))}</pre>
     </div>`;
+}
+
+function retryLiffLogin(cleanRedirectUri) {
+  const retryKey = "line-leave:reauth-retry:" + LIFF_ID;
+  let retryCount = 0;
+  try {
+    retryCount = Number(sessionStorage.getItem(retryKey) || 0);
+  } catch (e) {}
+  if (retryCount >= 1) {
+    showLiffProblem("เซสชันหมดอายุ", "ไม่สามารถยืนยันตัวตนกับ LINE ได้ กรุณาเข้าสู่ระบบใหม่อีกครั้ง", true);
+    return;
+  }
+  try { sessionStorage.setItem(retryKey, String(retryCount + 1)); } catch (e) {}
+  window.LeaveSystemAuth?.beginLogin(LIFF_ID);
+  try { liff.logout(); } catch (e) {}
+  liff.login({ redirectUri: cleanRedirectUri });
 }
 
 /* ===================== INIT LIFF ===================== */
@@ -437,7 +453,7 @@ async function initializeLiff() {
     if (!liff.isLoggedIn()) {
       // Auto login on PC / external browser
       window.LeaveSystemAuth?.beginLogin(LIFF_ID);
-      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
+      liff.login({ redirectUri: cleanRedirectUri });
       return;
     }
 
@@ -457,8 +473,7 @@ async function initializeLiff() {
 
     if (isExpired && !liff.isInClient()) {
       console.warn("User ID token expired or missing on PC, refreshing session...");
-      try { liff.logout(); } catch (e) {}
-      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
+      retryLiffLogin(cleanRedirectUri);
       return;
     }
 
@@ -469,8 +484,7 @@ async function initializeLiff() {
       profile = await liff.getProfile();
     } catch (profErr) {
       console.warn("Could not getProfile (session possibly stale), resetting...", profErr);
-      try { liff.logout(); } catch (e) {}
-      liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
+      retryLiffLogin(cleanRedirectUri);
       return;
     }
 
@@ -493,11 +507,11 @@ async function initializeLiff() {
 
     try {
       await loadPageData();
+      try { sessionStorage.removeItem("line-leave:reauth-retry:" + LIFF_ID); } catch (e) {}
     } catch (pageErr) {
       if (pageErr.message && (pageErr.message.includes("LINE authentication required") || pageErr.message.includes("401"))) {
         console.warn("ID Token expired or invalid on backend, re-authenticating...", pageErr);
-        try { liff.logout(); } catch (e) {}
-        liff.login({ redirectUri: liff.isInClient() ? cleanRedirectUri : (window.location.origin + '/') });
+        retryLiffLogin(cleanRedirectUri);
         return;
       }
       throw pageErr;

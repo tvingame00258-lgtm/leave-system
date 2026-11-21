@@ -4,7 +4,7 @@
  * ทดสอบทั้งมุมมอง Desktop PC และ Mobile
  */
 
-const { chromium } = require('playwright');
+import { chromium } from 'playwright';
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://line-leave-relay.finnlution.workers.dev';
 

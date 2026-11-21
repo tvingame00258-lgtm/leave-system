@@ -1,6 +1,20 @@
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 const DEFAULT_SUPABASE_URL = 'https://tsjfqjisabmbrgbdgyif.supabase.co';
+const DEFAULT_BASE_URL = 'https://line-leave-relay.finnlution.workers.dev';
+const DEFAULT_GM_LINE_ID = 'U7c04ba211a5fc02c29f834adf9fbc538';
+
+function getBaseUrl(env, request) {
+  let reqOrigin = '';
+  if (request && request.url) {
+    try { reqOrigin = new URL(request.url).origin; } catch (e) {}
+  }
+  return ((env && env.PUBLIC_BASE_URL) || reqOrigin || DEFAULT_BASE_URL).replace(/\/+$/, '');
+}
+
+function getDefaultGmLineId(env) {
+  return ((env && env.GM_LINE_USER_ID) || DEFAULT_GM_LINE_ID).trim();
+}
 
 const AUTH_SYNC_SCRIPT = `<script>
 window.LeaveSystemAuth = (() => {
@@ -201,7 +215,10 @@ function jsonToCsv(rows) {
   const headers = Object.keys(rows[0]);
   const escapeCsv = (val) => {
     if (val === null || val === undefined) return '';
-    const str = String(val);
+    let str = String(val);
+    if (/^[\t\r ]*[=+\-@]/.test(str) || /^[\t\r]/.test(str)) {
+      str = "'" + str;
+    }
     if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
       return `"${str.replace(/"/g, '""')}"`;
     }
@@ -262,12 +279,13 @@ async function verifyApproverLink(payload, env) {
   return verifyHmacSignature(`${reqId}:${approverLineId}:${expiresAt}`, payload.sig, secret);
 }
 
-async function buildRejectUrl(reqId, approverUid, env) {
+async function buildRejectUrl(reqId, approverUid, env, baseUrl) {
   const secret = (env && (env.LINE_CHANNEL_SECRET || env.CHANNEL_SECRET)) || '';
   if (!secret || !approverUid) return '';
   const expiresAt = Math.floor(Date.now() / 1000) + 15 * 60;
   const sig = await generateHmacSignature(`${reqId}:${approverUid}:${expiresAt}`, secret);
-  return `https://line-leave-relay.finnlution.workers.dev/reject?reqId=${encodeURIComponent(reqId)}&uid=${encodeURIComponent(approverUid)}&exp=${expiresAt}&sig=${sig}`;
+  const origin = (baseUrl || getBaseUrl(env)).replace(/\/+$/, '');
+  return `${origin}/reject?reqId=${encodeURIComponent(reqId)}&uid=${encodeURIComponent(approverUid)}&exp=${expiresAt}&sig=${sig}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +322,8 @@ function buildApprovalFlex(data) {
   const stageTitle = data.stage === 'GM' 
     ? 'รอ ผจก.ทั่วไป พิจารณา (ขั้นที่ 2)' 
     : (data.stage === 'DIRECT_GM' ? 'รอ ผจก.ทั่วไป พิจารณา' : 'รอหัวหน้าแผนกพิจารณา (ขั้นที่ 1)');
-  const rejectUrl = data.rejectUrl || ('https://line-leave-relay.finnlution.workers.dev/reject?reqId=' + encodeURIComponent(data.requestId));
+  const fallbackBase = (data.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const rejectUrl = data.rejectUrl || (`${fallbackBase}/reject?reqId=` + encodeURIComponent(data.requestId));
 
   const bodyContents = [
     flexRow('บริษัท:', data.company, true),
@@ -411,6 +430,9 @@ function buildResultFlex(data) {
   rows.push(flexRow('สถานะ:', statusEmoji, true, color, 'sm'));
   if (data.approverName) {
     rows.push(flexRow('พิจารณาโดย:', data.approverName));
+  }
+  if (!isApproved && data.actionReason) {
+    rows.push(flexRow('เหตุผลที่ไม่อนุมัติ:', data.actionReason, true, '#DC2626', 'xs'));
   }
 
   return {
@@ -615,7 +637,7 @@ function flexRow(label, value, bold = false, color = '#111827', size = 'xs') {
   };
 }
 
-function buildMenuFlex(baseUrl = 'https://line-leave-relay.finnlution.workers.dev') {
+function buildMenuFlex(baseUrl = DEFAULT_BASE_URL) {
   return {
     type: 'flex',
     altText: '📋 เมนูหลักระบบลางาน',
@@ -831,11 +853,11 @@ function isEligibleReportingManager(employee, manager) {
   return false;
 }
 
-function isAssignedApprover(req, lineUserId) {
+function isAssignedApprover(req, lineUserId, env) {
   if (!req || !lineUserId) return false;
   if (req.status === 'PENDING_MANAGER') return req.manager_line_id === lineUserId;
   if (req.status === 'PENDING_GM') {
-    return (req.gm_line_id || 'U7c04ba211a5fc02c29f834adf9fbc538') === lineUserId;
+    return (req.gm_line_id || getDefaultGmLineId(env)) === lineUserId;
   }
   return false;
 }
@@ -918,9 +940,27 @@ async function handleRegisterEmployee(env, payload) {
   const pendingApproval = row.registration_status === 'PENDING';
   return { success: true, pendingApproval, message: pendingApproval ? 'ส่งข้อมูลแล้ว กรุณารอผู้ดูแลระบบยืนยันบัญชีก่อนใช้งาน' : 'บันทึกข้อมูลพนักงานเรียบร้อยแล้ว' };
 }
-async function handleSubmitLeaveRequest(env, payload) {
+function isValidIsoDate(dateStr) {
+  if (typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+async function handleSubmitLeaveRequest(env, payload, baseUrl) {
   if (!payload || !payload.employeeLineId || !payload.leaveType || !payload.startDate || !payload.endDate) {
     return { success: false, message: 'ข้อมูลการลาไม่ครบถ้วน' };
+  }
+  if (!isValidIsoDate(payload.startDate) || !isValidIsoDate(payload.endDate) || payload.endDate < payload.startDate) {
+    return { success: false, message: 'ช่วงวันที่ลาไม่ถูกต้อง' };
+  }
+  const totalDays = Number(payload.totalDays);
+  if (!Number.isFinite(totalDays) || totalDays <= 0 || totalDays > 365) {
+    return { success: false, message: 'จำนวนวันลาไม่ถูกต้อง' };
+  }
+  const reason = String(payload.reason || '').trim();
+  if (!reason) {
+    return { success: false, message: 'กรุณาระบุเหตุผลการลา' };
   }
 
   // Get employee details
@@ -931,7 +971,7 @@ async function handleSubmitLeaveRequest(env, payload) {
   if (emp.registration_status && emp.registration_status !== 'ACTIVE') return { success: false, message: 'บัญชีกำลังรอผู้ดูแลยืนยัน จึงยังยื่นใบลาไม่ได้' };
 
   // Determine General Manager (GM) LINE ID (same for all companies)
-  let gmLineId = 'U7c04ba211a5fc02c29f834adf9fbc538';
+  let gmLineId = getDefaultGmLineId(env);
   try {
     const gmRes = await supabaseQuery(env, `employees?department=eq.${encodeURIComponent('ผู้จัดการทั่วไป')}&select=line_user_id&limit=1`);
     if (gmRes.ok) {
@@ -953,7 +993,9 @@ async function handleSubmitLeaveRequest(env, payload) {
 
   const now = new Date();
   const dateNum = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const rand = Math.floor(1000 + Math.random() * 9000);
+  const randBuf = new Uint32Array(1);
+  crypto.getRandomValues(randBuf);
+  const rand = String(randBuf[0] % 1000000).padStart(6, '0');
   const requestId = `LV-${dateNum}-${rand}`;
 
   const initialStatus = isManager ? 'PENDING_GM' : 'PENDING_MANAGER';
@@ -970,8 +1012,8 @@ async function handleSubmitLeaveRequest(env, payload) {
     other_leave_detail: payload.otherLeaveDetail || null,
     start_date: payload.startDate,
     end_date: payload.endDate,
-    total_days: Number(payload.totalDays) || 1,
-    reason: payload.reason,
+    total_days: totalDays,
+    reason,
     status: initialStatus,
     manager_line_id: isManager ? gmLineId : emp.manager_line_id,
     gm_line_id: gmLineId,
@@ -995,7 +1037,7 @@ async function handleSubmitLeaveRequest(env, payload) {
   if (token) {
     const targetApprover = isManager ? gmLineId : emp.manager_line_id;
     const stage = isManager ? 'DIRECT_GM' : 'MANAGER';
-    const rejectUrl = await buildRejectUrl(requestId, targetApprover, env);
+    const rejectUrl = await buildRejectUrl(requestId, targetApprover, env, baseUrl);
 
     const flex = buildApprovalFlex({
       requestId,
@@ -1007,10 +1049,11 @@ async function handleSubmitLeaveRequest(env, payload) {
       leaveType: payload.leaveType + (payload.otherLeaveDetail ? ` (${payload.otherLeaveDetail})` : ''),
       startDate: payload.startDate,
       endDate: payload.endDate,
-      totalDays: payload.totalDays,
-      reason: payload.reason,
+      totalDays,
+      reason,
       stage,
-      rejectUrl
+      rejectUrl,
+      baseUrl
     });
 
     const pushRes = await lineApiCall('push', token, {
@@ -1063,12 +1106,13 @@ async function handleWebhook(request, env, ctx) {
   if (!safeEqual(expected, sig)) return new Response('Forbidden', { status: 403 });
 
   // Process LINE events in background
-  ctx.waitUntil(processLineEvents(body, env));
+  const baseUrl = getBaseUrl(env, request);
+  ctx.waitUntil(processLineEvents(body, env, baseUrl));
 
   return new Response('OK', { status: 200 });
 }
 
-async function processLineEvents(rawBody, env) {
+async function processLineEvents(rawBody, env, baseUrl) {
   try {
     const data = JSON.parse(rawBody);
     const events = data.events || [];
@@ -1080,9 +1124,9 @@ async function processLineEvents(rawBody, env) {
 
     for (const ev of events) {
       if (ev.type === 'postback' && ev.postback && ev.postback.data) {
-        await handlePostback(ev, env, token);
+        await handlePostback(ev, env, token, baseUrl);
       } else if (ev.type === 'message' && ev.message && ev.message.type === 'text') {
-        await handleIncomingMessage(ev, env, token);
+        await handleIncomingMessage(ev, env, token, baseUrl);
       }
     }
   } catch (err) {
@@ -1090,16 +1134,16 @@ async function processLineEvents(rawBody, env) {
   }
 }
 
-async function handleIncomingMessage(ev, env, token) {
+async function handleIncomingMessage(ev, env, token, baseUrl) {
   if (!token || !ev.replyToken) return;
-  const menuFlex = buildMenuFlex();
+  const menuFlex = buildMenuFlex(baseUrl || getBaseUrl(env));
   await lineApiCall('reply', token, {
     replyToken: ev.replyToken,
     messages: [menuFlex]
   });
 }
 
-async function handlePostback(ev, env, token) {
+async function handlePostback(ev, env, token, baseUrl) {
   const params = new URLSearchParams(ev.postback.data);
   const action = params.get('action'); // 'approve' | 'reject'
   const reqId = params.get('reqId');
@@ -1114,7 +1158,7 @@ async function handlePostback(ev, env, token) {
   if (!req) return;
 
   if (action === 'reject') {
-    if (!isAssignedApprover(req, approverUserId)) {
+    if (!isAssignedApprover(req, approverUserId, env)) {
       if (token && ev.replyToken) {
         await lineApiCall('reply', token, {
           replyToken: ev.replyToken,
@@ -1124,7 +1168,7 @@ async function handlePostback(ev, env, token) {
       return;
     }
     if (token && ev.replyToken) {
-      const rejectUrl = await buildRejectUrl(reqId, approverUserId, env);
+      const rejectUrl = await buildRejectUrl(reqId, approverUserId, env, baseUrl);
       if (!rejectUrl) return;
       await lineApiCall('reply', token, {
         replyToken: ev.replyToken,
@@ -1171,6 +1215,16 @@ async function handlePostback(ev, env, token) {
     );
 
     if (!updateRes.ok) return;
+    const updatedStep1Rows = await updateRes.json().catch(() => []);
+    if (!Array.isArray(updatedStep1Rows) || updatedStep1Rows.length === 0) {
+      if (token && ev.replyToken) {
+        await lineApiCall('reply', token, {
+          replyToken: ev.replyToken,
+          messages: [{ type: 'text', text: `ℹ️ คำขอ ${reqId} นี้ได้รับการดำเนินการไปแล้ว` }]
+        });
+      }
+      return;
+    }
 
     if (token && ev.replyToken) {
       const confirmFlex = buildApproverConfirmFlex({
@@ -1204,9 +1258,9 @@ async function handlePostback(ev, env, token) {
       });
     }
 
-    const gmTarget = req.gm_line_id || 'U7c04ba211a5fc02c29f834adf9fbc538';
+    const gmTarget = req.gm_line_id || getDefaultGmLineId(env);
     if (token && gmTarget) {
-      const rejectUrl = await buildRejectUrl(reqId, gmTarget, env);
+      const rejectUrl = await buildRejectUrl(reqId, gmTarget, env, baseUrl);
       const gmFlex = buildApprovalFlex({
         requestId: reqId,
         company: req.company,
@@ -1221,7 +1275,8 @@ async function handlePostback(ev, env, token) {
         reason: req.reason,
         stage: 'GM',
         managerApprovedBy: approverName,
-        rejectUrl
+        rejectUrl,
+        baseUrl
       });
       await lineApiCall('push', token, {
         to: gmTarget,
@@ -1233,7 +1288,7 @@ async function handlePostback(ev, env, token) {
 
   // CASE 2: Step 2 Approval by General Manager (PENDING_GM -> APPROVED)
   if (req.status === 'PENDING_GM') {
-    const gmTarget = req.gm_line_id || 'U7c04ba211a5fc02c29f834adf9fbc538';
+    const gmTarget = req.gm_line_id || getDefaultGmLineId(env);
     const isGm = gmTarget === approverUserId;
     if (!isGm) {
       if (token && ev.replyToken) {
@@ -1261,6 +1316,16 @@ async function handlePostback(ev, env, token) {
     );
 
     if (!updateRes.ok) return;
+    const updatedStep2Rows = await updateRes.json().catch(() => []);
+    if (!Array.isArray(updatedStep2Rows) || updatedStep2Rows.length === 0) {
+      if (token && ev.replyToken) {
+        await lineApiCall('reply', token, {
+          replyToken: ev.replyToken,
+          messages: [{ type: 'text', text: `ℹ️ คำขอ ${reqId} นี้ได้รับการดำเนินการไปแล้ว` }]
+        });
+      }
+      return;
+    }
 
     if (token && ev.replyToken) {
       const confirmFlex = buildApproverConfirmFlex({
@@ -1343,7 +1408,7 @@ async function handleGetLeaveRequestDetail(env, reqId, approverLineId) {
   if (!res.ok) return null;
   const list = await res.json();
   const req = list && list[0];
-  if (!isAssignedApprover(req, approverLineId)) return null;
+  if (!isAssignedApprover(req, approverLineId, env)) return null;
   const { manager_line_id, gm_line_id, ...safeRequest } = req;
   return safeRequest;
 }
@@ -1363,7 +1428,7 @@ async function handleRejectLeaveRequest(env, payload) {
   if (!req) return { success: false, message: 'ไม่พบคำขอลา' };
 
   const approverUserId = payload.approverLineId || '';
-  if (!isAssignedApprover(req, approverUserId)) {
+  if (!isAssignedApprover(req, approverUserId, env)) {
     return { success: false, forbidden: true, message: 'คุณไม่มีสิทธิ์พิจารณาคำขอนี้' };
   }
   const nowIso = new Date().toISOString();
@@ -1392,7 +1457,7 @@ async function handleRejectLeaveRequest(env, payload) {
   }
 
   const updateRes = await supabaseQuery(env,
-    `leave_requests?request_id=eq.${encodeURIComponent(reqId)}&select=request_id`,
+    `leave_requests?request_id=eq.${encodeURIComponent(reqId)}&status=eq.${encodeURIComponent(req.status)}&select=request_id`,
     {
       method: 'PATCH',
       headers: { 'Prefer': 'return=representation' },
@@ -1402,6 +1467,10 @@ async function handleRejectLeaveRequest(env, payload) {
 
   if (!updateRes.ok) {
     return { success: false, message: 'บันทึกการไม่อนุมัติไม่สำเร็จ' };
+  }
+  const updatedRows = await updateRes.json().catch(() => []);
+  if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+    return { success: false, message: 'คำขอนี้ได้รับการดำเนินการไปแล้ว' };
   }
 
   // Notify Employee via LINE
@@ -1533,7 +1602,7 @@ async function handleApi(request, env, ctx) {
     if (fn === 'getRegisterPageData') result = await handleGetRegisterPageData(env, verifiedLineUserId);
     else if (fn === 'getEmployeeProfile') result = await handleGetEmployeeProfile(env, verifiedLineUserId);
     else if (fn === 'registerEmployee') result = await handleRegisterEmployee(env, { ...payload, lineUserId: verifiedLineUserId });
-    else if (fn === 'submitLeaveRequest') result = await handleSubmitLeaveRequest(env, { ...payload, employeeLineId: verifiedLineUserId });
+    else if (fn === 'submitLeaveRequest') result = await handleSubmitLeaveRequest(env, { ...payload, employeeLineId: verifiedLineUserId }, getBaseUrl(env, request));
     else if (fn === 'rejectLeaveRequest') {
       result = await handleRejectLeaveRequest(env, { ...payload, approverLineId: verifiedLineUserId });
       if (result && result.forbidden) return jsonResponse({ ok: false, error: result.message }, 403);
