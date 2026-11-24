@@ -12,7 +12,7 @@
                  │         │
                  │         ▼
       [ Cloudflare Worker (line-leave-relay) ]
-      (https://line-leave-relay.tvingame00258.workers.dev)
+      (https://line-leave-relay.finnlution.workers.dev)
                  │
                  ├── 2. ตรวจสอบ LINE ID Token & ประมวลผลคำขอ
                  │         │
@@ -47,14 +47,23 @@
 
 ---
 
+## 📝 อัปเดตล่าสุด (Latest Updates)
+
+- **2026-11-24:** แก้ไขปัญหาวนลูปล็อกอินหน้ายื่นใบลา (`/leave`) ทั้งบน PC และมือถือ โดยซิงค์ Cookie `LIFF_STORE:expires:<liffId>` คู่กับ `localStorage`, ป้องกันการเขียนทับ `loginTmp` ระหว่าง OAuth callback, เพิ่มตัวกันวนลูปล็อกอินและจัดการ Token หมดอายุครบทุกหน้า (`/`, `/register`, `/leave`, `/reject`, `/export-hr`) — ดูรายละเอียดทั้งหมดใน [`CHANGELOG.md`](CHANGELOG.md)
+
+---
+
 ## 📁 โครงสร้างโปรเจกต์
 
 ```
 โปรเจกต์ระบบลา/
 ├── src/
 │   ├── views/
+│   │   ├── portal.html       # หน้าหลักเข้าสู่ระบบ LINE และเลือกเมนู (LINE LIFF)
 │   │   ├── register.html     # หน้าเว็บแบบฟอร์มลงทะเบียนพนักงาน (LINE LIFF)
-│   │   └── leave.html        # หน้าเว็บแบบฟอร์มขอยื่นใบลา (LINE LIFF)
+│   │   ├── leave.html        # หน้าเว็บแบบฟอร์มขอยื่นใบลา (LINE LIFF)
+│   │   ├── reject.html       # หน้าเว็บระบุเหตุผลไม่อนุมัติใบลา
+│   │   └── hr-report.html    # หน้าเว็บยืนยันสิทธิ์และดาวน์โหลดรายงาน HR (CSV)
 │   └── worker-core.js        # โค้ด Backend หลักของ Cloudflare Worker
 ├── supabase/
 │   ├── schema.sql            # สคริปต์สร้างตาราง, View, Index
