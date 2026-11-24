@@ -24,23 +24,120 @@ window.LeaveSystemAuth = (() => {
   const configuredIds = ['__PORTAL_LIFF_ID__', '__REGISTER_LIFF_ID__', '__LEAVE_LIFF_ID__'];
 
   const isPending = liffId => sessionStorage.getItem(pendingLoginKey) === liffId;
+  const syncedSubKeys = ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context'];
+
+  function isOAuthCallback() {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      return params.has('code') || params.has('state') || params.has('liff.state');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getExpiresCookieName(liffId) {
+    return 'LIFF_STORE:expires:' + liffId;
+  }
+
+  function readExpiresCookie(liffId) {
+    try {
+      const target = getExpiresCookieName(liffId) + '=';
+      const parts = (document.cookie || '').split(';');
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i].trim();
+        if (part.startsWith(target)) {
+          const val = Number(part.slice(target.length));
+          if (Number.isFinite(val) && val > Date.now() + 30000) return val;
+        }
+      }
+    } catch (e) {}
+    return 0;
+  }
+
+  function writeExpiresCookie(liffId, expiresMs) {
+    try {
+      if (!liffId || !Number.isFinite(expiresMs) || expiresMs <= Date.now() + 30000) return;
+      const secureFlag = window.location.protocol === 'https:' ? '; secure' : '';
+      document.cookie = getExpiresCookieName(liffId) + '=' + Math.floor(expiresMs) +
+        '; expires=' + new Date(expiresMs).toUTCString() + '; path=/' + secureFlag;
+    } catch (e) {}
+  }
+
+  function deleteExpiresCookie(liffId) {
+    try {
+      if (!liffId || liffId.startsWith('__')) return;
+      document.cookie = getExpiresCookieName(liffId) + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    } catch (e) {}
+  }
+
+  function getStoredExpiryMs(liffId) {
+    const cookieExp = readExpiresCookie(liffId);
+    if (cookieExp) return cookieExp;
+    try {
+      const rawDecoded = localStorage.getItem('LIFF_STORE:' + liffId + ':decodedIDToken');
+      if (rawDecoded) {
+        const decoded = JSON.parse(rawDecoded);
+        if (decoded && decoded.exp) {
+          const expMs = Number(decoded.exp) * 1000;
+          if (Number.isFinite(expMs) && expMs > Date.now() + 30000) return expMs;
+        }
+      }
+    } catch (e) {}
+    return 0;
+  }
+
+  function readLiffEntries(liffId) {
+    const prefix = 'LIFF_STORE:' + liffId + ':';
+    const entries = [];
+    for (let i = 0; i < syncedSubKeys.length; i++) {
+      const sub = syncedSubKeys[i];
+      const val = localStorage.getItem(prefix + sub);
+      if (val !== null) entries.push({ sub, val });
+    }
+    return entries;
+  }
+
+  function hasValidStoredSession(liffId) {
+    if (!liffId || liffId.startsWith('__')) return false;
+    try {
+      const prefix = 'LIFF_STORE:' + liffId + ':';
+      const accessToken = localStorage.getItem(prefix + 'accessToken');
+      const idToken = localStorage.getItem(prefix + 'IDToken');
+      if (!accessToken || !idToken) return false;
+      const rawDecoded = localStorage.getItem(prefix + 'decodedIDToken');
+      if (rawDecoded) {
+        const decoded = JSON.parse(rawDecoded);
+        if (decoded && decoded.exp && Date.now() >= (decoded.exp * 1000 - 30000)) {
+          return false;
+        }
+      }
+      return getStoredExpiryMs(liffId) > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function copyLiffEntries(fromId, toId, entries) {
+    const sourceEntries = entries || readLiffEntries(fromId);
+    for (const entry of sourceEntries) {
+      const newK = 'LIFF_STORE:' + toId + ':' + entry.sub;
+      const newV = typeof entry.val === 'string' ? entry.val.split(fromId).join(toId) : entry.val;
+      localStorage.setItem(newK, newV);
+    }
+    const expMs = getStoredExpiryMs(fromId) || getStoredExpiryMs(toId);
+    if (expMs) writeExpiresCookie(toId, expMs);
+  }
 
   function syncStorageAcrossLiffIds(fromId) {
     if (!fromId) return;
     try {
+      const sourceEntries = readLiffEntries(fromId);
       const otherIds = configuredIds.filter(id => id && id !== fromId && !id.startsWith('__'));
-      for (const toId of otherIds) {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith('LIFF_STORE:' + fromId + ':')) {
-            const sub = k.slice(('LIFF_STORE:' + fromId + ':').length);
-            const val = localStorage.getItem(k);
-            if (val !== null) {
-              const newK = 'LIFF_STORE:' + toId + ':' + sub;
-              const newV = typeof val === 'string' ? val.split(fromId).join(toId) : val;
-              localStorage.setItem(newK, newV);
-            }
-          }
+      if (sourceEntries.length > 0) {
+        const fromExpMs = getStoredExpiryMs(fromId);
+        if (fromExpMs) writeExpiresCookie(fromId, fromExpMs);
+        for (const toId of otherIds) {
+          copyLiffEntries(fromId, toId, sourceEntries);
         }
       }
       const rawSessions = localStorage.getItem('test-liff-sessions');
@@ -58,6 +155,31 @@ window.LeaveSystemAuth = (() => {
     }
   }
 
+  function prepareSession(targetLiffId) {
+    if (!targetLiffId || targetLiffId.startsWith('__')) return false;
+    // Never overwrite LIFF_STORE during an active OAuth callback (?code=...&state=...)
+    // because LIFF SDK needs its untouched loginTmp (PKCE codeVerifier) to exchange the code.
+    if (isOAuthCallback()) return false;
+    if (Boolean(localStorage.getItem(logoutKey)) && !isPending(targetLiffId)) return false;
+    try {
+      if (hasValidStoredSession(targetLiffId)) {
+        const expMs = getStoredExpiryMs(targetLiffId);
+        if (expMs) writeExpiresCookie(targetLiffId, expMs);
+        return true;
+      }
+      for (const sourceId of configuredIds) {
+        if (!sourceId || sourceId === targetLiffId || sourceId.startsWith('__')) continue;
+        if (hasValidStoredSession(sourceId)) {
+          copyLiffEntries(sourceId, targetLiffId);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('LIFF prepareSession failed:', e);
+    }
+    return false;
+  }
+
   function clearAllLiffSessions() {
     try {
       const keysToRemove = [];
@@ -68,6 +190,7 @@ window.LeaveSystemAuth = (() => {
         }
       }
       keysToRemove.forEach(k => localStorage.removeItem(k));
+      configuredIds.forEach(id => deleteExpiresCookie(id));
       const rawSessions = localStorage.getItem('test-liff-sessions');
       if (rawSessions) {
         try {
@@ -87,6 +210,7 @@ window.LeaveSystemAuth = (() => {
   return {
     getConfiguredIds() { return configuredIds; },
     getActiveUser() { return localStorage.getItem(activeUserKey); },
+    prepareSession,
     shouldBlock(liffId) {
       return Boolean(localStorage.getItem(logoutKey)) && !isPending(liffId);
     },

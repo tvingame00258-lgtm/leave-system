@@ -470,3 +470,150 @@ test('HR report page fetches exportHr only once across load and download', async
   expect(download.suggestedFilename()).toBe('leave_summary.csv');
   expect(exportApiCalls).toBe(1);
 });
+
+test('portal LINE login syncs all LIFF_STORE keys and /register opens without re-login on PC', async ({ page }) => {
+  await page.route('https://static.line-scdn.net/liff/edge/2/sdk.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: `
+      let activeId = '';
+      const key = (id, name) => 'LIFF_STORE:' + id + ':' + name;
+      window.liff = {
+        init: async ({ liffId }) => {
+          activeId = liffId;
+          window.__activeLiffId = liffId;
+        },
+        isLoggedIn: () => Boolean(localStorage.getItem(key(activeId, 'accessToken')) && localStorage.getItem(key(activeId, 'IDToken'))),
+        login: () => {
+          window.__liffLoginCount = (window.__liffLoginCount || 0) + 1;
+          const exp = Math.floor(Date.now() / 1000) + 3600;
+          localStorage.setItem(key(activeId, 'accessToken'), 'access-tok-' + activeId);
+          localStorage.setItem(key(activeId, 'IDToken'), 'valid-employee-token');
+          localStorage.setItem(key(activeId, 'decodedIDToken'), JSON.stringify({ sub: 'EMPLOYEE-1', exp }));
+          localStorage.setItem(key(activeId, 'clientId'), '2011955364');
+          localStorage.setItem(key(activeId, 'context'), JSON.stringify({ liffId: activeId, type: 'external' }));
+          window.location.reload();
+        },
+        logout: () => {
+          ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context'].forEach(k => localStorage.removeItem(key(activeId, k)));
+        },
+        getIDToken: () => localStorage.getItem(key(activeId, 'IDToken')) || '',
+        getDecodedIDToken: () => {
+          const raw = localStorage.getItem(key(activeId, 'decodedIDToken'));
+          return raw ? JSON.parse(raw) : null;
+        },
+        getProfile: async () => ({ userId: 'EMPLOYEE-1', displayName: 'พนักงานทดสอบ' }),
+        isInClient: () => false
+      };
+    `
+  }));
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /เข้าสู่ระบบ LINE/i }).click();
+  await expect(page.locator('#accountName')).toHaveText('พนักงานทดสอบ');
+
+  // Verify all 5 LIFF_STORE keys were copied to REGISTER and LEAVE LIFF IDs without skipping
+  const syncedKeys = await page.evaluate(() => ({
+    reg: ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context']
+      .every(k => Boolean(localStorage.getItem('LIFF_STORE:2011955364-O2qTmo0r:' + k))),
+    leave: ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context']
+      .every(k => Boolean(localStorage.getItem('LIFF_STORE:2011955364-FCY27ABh:' + k)))
+  }));
+  expect(syncedKeys).toEqual({ reg: true, leave: true });
+
+  // Simulate register LIFF keys being absent/expired while portal session is still valid
+  await page.evaluate(() => {
+    localStorage.removeItem('LIFF_STORE:2011955364-O2qTmo0r:accessToken');
+    localStorage.removeItem('LIFF_STORE:2011955364-O2qTmo0r:IDToken');
+  });
+
+  // Navigate to /register: prepareSession should restore keys before liff.init(), no liff.login() call
+  await page.getByRole('link', { name: /ลงทะเบียนพนักงาน/i }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.locator('#registerForm')).toBeVisible();
+  expect(await page.evaluate(() => window.__liffLoginCount || 0)).toBe(0);
+});
+
+test('/leave syncs LIFF_STORE expires cookie and never clobbers OAuth callback loginTmp', async ({ page }) => {
+  await page.route('https://static.line-scdn.net/liff/edge/2/sdk.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: `
+      let activeId = '';
+      const key = (id, name) => 'LIFF_STORE:' + id + ':' + name;
+      const hasExpiresCookie = (id) => document.cookie.split(';').some(c => c.trim().startsWith('LIFF_STORE:expires:' + id + '='));
+      const clearStore = (id) => {
+        ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context', 'loginTmp'].forEach(k => localStorage.removeItem(key(id, k)));
+        document.cookie = 'LIFF_STORE:expires:' + id + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+      };
+      window.liff = {
+        init: async ({ liffId }) => {
+          activeId = liffId;
+          // Mirror real LINE LIFF SDK v2 behavior: if accessToken exists without LIFF_STORE:expires:<liffId> cookie, wipe store including loginTmp!
+          if (localStorage.getItem(key(activeId, 'accessToken')) && !hasExpiresCookie(activeId)) {
+            clearStore(activeId);
+          }
+          const params = new URLSearchParams(window.location.search);
+          if (params.has('code') && params.has('state')) {
+            const loginTmp = localStorage.getItem(key(activeId, 'loginTmp'));
+            if (loginTmp) {
+              const exp = Math.floor(Date.now() / 1000) + 3600;
+              localStorage.setItem(key(activeId, 'accessToken'), 'oauth-access-' + activeId);
+              localStorage.setItem(key(activeId, 'IDToken'), 'valid-employee-token');
+              localStorage.setItem(key(activeId, 'decodedIDToken'), JSON.stringify({ sub: 'EMPLOYEE-1', exp }));
+              document.cookie = 'LIFF_STORE:expires:' + activeId + '=' + (exp * 1000) + '; path=/';
+              localStorage.removeItem(key(activeId, 'loginTmp'));
+            }
+          }
+        },
+        isLoggedIn: () => Boolean(localStorage.getItem(key(activeId, 'accessToken')) && localStorage.getItem(key(activeId, 'IDToken'))),
+        login: () => { window.__liffLoginCount = (window.__liffLoginCount || 0) + 1; },
+        logout: () => clearStore(activeId),
+        getIDToken: () => localStorage.getItem(key(activeId, 'IDToken')) || '',
+        getDecodedIDToken: () => {
+          const raw = localStorage.getItem(key(activeId, 'decodedIDToken'));
+          return raw ? JSON.parse(raw) : null;
+        },
+        getProfile: async () => ({ userId: 'EMPLOYEE-1', displayName: 'พนักงานทดสอบ' }),
+        isInClient: () => false
+      };
+    `
+  }));
+
+  // Scenario 1: Portal session exists (with loginTmp and config), navigating to /leave sets expires cookie and opens without re-login
+  await page.goto('/');
+  await page.evaluate(() => {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const p = 'LIFF_STORE:2011955364-wZgUDTq6:';
+    localStorage.setItem(p + 'accessToken', 'portal-access');
+    localStorage.setItem(p + 'IDToken', 'valid-employee-token');
+    localStorage.setItem(p + 'decodedIDToken', JSON.stringify({ sub: 'EMPLOYEE-1', exp }));
+    localStorage.setItem(p + 'clientId', '2011955364');
+    localStorage.setItem(p + 'context', JSON.stringify({ liffId: '2011955364-wZgUDTq6', type: 'external' }));
+    localStorage.setItem(p + 'loginTmp', JSON.stringify({ codeVerifier: 'portal-secret' }));
+    localStorage.setItem(p + 'config', JSON.stringify({ endpointUrl: 'https://example.test/' }));
+    document.cookie = 'LIFF_STORE:expires:2011955364-wZgUDTq6=' + (exp * 1000) + '; path=/';
+  });
+
+  await page.goto('/leave');
+  await expect(page.locator('#leaveForm')).toBeVisible();
+  expect(await page.evaluate(() => window.__liffLoginCount || 0)).toBe(0);
+  // Ensure loginTmp and config were NOT copied to leave LIFF store
+  const leaked = await page.evaluate(() => ({
+    loginTmp: localStorage.getItem('LIFF_STORE:2011955364-FCY27ABh:loginTmp'),
+    config: localStorage.getItem('LIFF_STORE:2011955364-FCY27ABh:config'),
+    hasCookie: document.cookie.includes('LIFF_STORE:expires:2011955364-FCY27ABh=')
+  }));
+  expect(leaked).toEqual({ loginTmp: null, config: null, hasCookie: true });
+
+  // Scenario 2: Returning from OAuth callback (?code=...&state=...) preserves leave loginTmp and completes login
+  await page.evaluate(() => {
+    ['accessToken', 'IDToken', 'decodedIDToken', 'clientId', 'context'].forEach(k =>
+      localStorage.removeItem('LIFF_STORE:2011955364-FCY27ABh:' + k)
+    );
+    document.cookie = 'LIFF_STORE:expires:2011955364-FCY27ABh=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    localStorage.setItem('LIFF_STORE:2011955364-FCY27ABh:loginTmp', JSON.stringify({ codeVerifier: 'leave-pkce-verifier' }));
+  });
+
+  await page.goto('/leave?code=testcode&state=teststate&liffClientId=2011955364');
+  await expect(page.locator('#leaveForm')).toBeVisible();
+  expect(await page.evaluate(() => window.__liffLoginCount || 0)).toBe(0);
+});

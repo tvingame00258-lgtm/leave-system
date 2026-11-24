@@ -388,7 +388,7 @@
         return;
       }
       window.LeaveSystemAuth?.beginLogin(PORTAL_LIFF_ID);
-      liff.login({ redirectUri: window.location.href });
+      liff.login({ redirectUri: window.location.origin + window.location.pathname });
     });
 
     lineLogoutBtn.addEventListener('click', () => {
@@ -402,7 +402,13 @@
           showSignedOut('เชื่อมต่อ LINE ไม่สำเร็จ');
           return;
         }
+        window.LeaveSystemAuth?.prepareSession(PORTAL_LIFF_ID);
         await liff.init({ liffId: PORTAL_LIFF_ID });
+        if (window.location.search && (window.location.search.includes('code=') || window.location.search.includes('state='))) {
+          try {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } catch (e) {}
+        }
         if (window.LeaveSystemAuth?.shouldBlock(PORTAL_LIFF_ID)) {
           if (liff.isLoggedIn()) liff.logout();
           showSignedOut();
@@ -442,6 +448,10 @@
             const data = await res.json();
             const empData = data && data.ok ? data.result : null;
             unlockCards(profile, empData);
+          } else if (res.status === 401) {
+            window.LeaveSystemAuth?.logout();
+            showSignedOut('เซสชันหมดอายุ กรุณาเข้าสู่ระบบ LINE ใหม่');
+            return;
           } else {
             unlockCards(profile, null);
           }

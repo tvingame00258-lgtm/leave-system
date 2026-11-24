@@ -51,15 +51,41 @@
       } finally { button.disabled = false; }
     });
     (async () => {
+      const cleanRedirectUri = window.location.origin + window.location.pathname;
+      const attemptKey = 'line-leave:login-attempt:' + LIFF_ID;
       try {
         if (typeof liff === 'undefined' || !LIFF_ID || LIFF_ID.startsWith('__')) throw new Error('ยังไม่ได้ตั้งค่า LINE Login');
+        const returnedFromOAuth = Boolean(
+          window.location.search &&
+          (window.location.search.includes('code=') || window.location.search.includes('state='))
+        );
+        window.LeaveSystemAuth?.prepareSession(LIFF_ID);
         await liff.init({ liffId: LIFF_ID });
+        if (returnedFromOAuth) {
+          try { window.history.replaceState({}, document.title, window.location.pathname); } catch (e) {}
+        }
+        if (window.LeaveSystemAuth?.shouldBlock(LIFF_ID)) {
+          if (liff.isLoggedIn()) liff.logout();
+          throw new Error('ออกจากระบบแล้ว กรุณากลับไปหน้าแรกเพื่อเข้าสู่ระบบ LINE ใหม่');
+        }
         if (!liff.isLoggedIn()) {
+          let attempts = 0;
+          try { attempts = Number(sessionStorage.getItem(attemptKey) || 0); } catch (e) {}
+          if (returnedFromOAuth || attempts >= 2) {
+            throw new Error('ไม่สามารถเข้าสู่ระบบ LINE ได้ กรุณารีเฟรชหรือเข้าสู่ระบบใหม่จากหน้าแรก');
+          }
+          try { sessionStorage.setItem(attemptKey, String(attempts + 1)); } catch (e) {}
           statusEl.textContent = 'กำลังเข้าสู่ระบบ LINE...';
-          liff.login({ redirectUri: window.location.href });
+          window.LeaveSystemAuth?.beginLogin(LIFF_ID);
+          liff.login({ redirectUri: cleanRedirectUri });
           return;
         }
+        try { sessionStorage.removeItem(attemptKey); } catch (e) {}
         const profile = await liff.getProfile();
+        if (window.LeaveSystemAuth && !window.LeaveSystemAuth.completeLogin(LIFF_ID, profile.userId)) {
+          window.LeaveSystemAuth.logout();
+          throw new Error('บัญชี LINE เปลี่ยนไป กรุณาเข้าสู่ระบบใหม่อีกครั้ง');
+        }
         const response = await fetch('/api', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fn: 'exportHr', args: [{ lineUserId: profile.userId, idToken: liff.getIDToken() || '' }] })

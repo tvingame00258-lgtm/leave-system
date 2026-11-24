@@ -344,7 +344,7 @@ function showError(title, message) {
           : escapeHtml(message)}
       </p>
       <div class="flex flex-col gap-2 justify-center">
-        <button type="button" onclick="try{liff.logout();}catch(e){};liff.login({redirectUri:'${cleanRedirectUri}'});"
+        <button type="button" onclick="try{sessionStorage.removeItem('line-leave:reauth-retry:'+LIFF_ID);sessionStorage.removeItem('line-leave:login-attempt:'+LIFF_ID);}catch(e){};window.LeaveSystemAuth?.beginLogin(LIFF_ID);try{liff.logout();}catch(e){};liff.login({redirectUri:'${cleanRedirectUri}'});"
                 class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow transition">
           <i class="fa-solid fa-arrow-rotate-right mr-1.5"></i> เข้าสู่ระบบ LINE อีกครั้ง
         </button>
@@ -436,7 +436,7 @@ function showLiffProblem(title, detail, showLogin = false) {
       <p class="text-xs text-gray-500 mt-2">${escapeHtml(detail)}</p>
       ${showLogin ? `
         <div class="text-center mt-3">
-          <button type="button" onclick="try { sessionStorage.removeItem('line-leave:reauth-retry:' + LIFF_ID); } catch(e){}; window.LeaveSystemAuth?.beginLogin(LIFF_ID); try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
+          <button type="button" onclick="try { sessionStorage.removeItem('line-leave:reauth-retry:' + LIFF_ID); sessionStorage.removeItem('line-leave:login-attempt:' + LIFF_ID); } catch(e){}; window.LeaveSystemAuth?.beginLogin(LIFF_ID); try { liff.logout(); } catch(e){}; liff.login({ redirectUri: '${cleanRedirectUri}' });"
                   class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow">
             <i class="fa-solid fa-arrow-rotate-right mr-1"></i> เข้าสู่ระบบ LINE ใหม่อีกครั้ง
           </button>
@@ -482,6 +482,7 @@ async function initializeLiff() {
       )
     );
 
+    window.LeaveSystemAuth?.prepareSession(LIFF_ID);
     await Promise.race([liff.init({ liffId: LIFF_ID }), timeoutPromise]);
 
     if (window.LeaveSystemAuth?.shouldBlock(LIFF_ID)) {
@@ -491,7 +492,11 @@ async function initializeLiff() {
     }
 
     // Clean URL query params if returning from LINE Login (removes ?code=...&state=...)
-    if (window.location.search && (window.location.search.includes("code=") || window.location.search.includes("state="))) {
+    const returnedFromOAuth = Boolean(
+      window.location.search &&
+      (window.location.search.includes("code=") || window.location.search.includes("state="))
+    );
+    if (returnedFromOAuth) {
       try {
         window.history.replaceState({}, document.title, window.location.pathname);
       } catch (e) {}
@@ -508,11 +513,24 @@ async function initializeLiff() {
     } catch (e) {}
 
     if (!liff.isLoggedIn()) {
+      if (returnedFromOAuth) {
+        retryLiffLogin(cleanRedirectUri);
+        return;
+      }
+      const loginAttemptKey = "line-leave:login-attempt:" + LIFF_ID;
+      let attempts = 0;
+      try { attempts = Number(sessionStorage.getItem(loginAttemptKey) || 0); } catch (e) {}
+      if (attempts >= 2) {
+        showLiffProblem("ไม่สามารถเข้าสู่ระบบ LINE ได้", "กรุณากดปุ่มด้านล่างเพื่อเข้าสู่ระบบใหม่อีกครั้ง", true);
+        return;
+      }
+      try { sessionStorage.setItem(loginAttemptKey, String(attempts + 1)); } catch (e) {}
       // Auto login on PC / external browser
       window.LeaveSystemAuth?.beginLogin(LIFF_ID);
       liff.login({ redirectUri: cleanRedirectUri });
       return;
     }
+    try { sessionStorage.removeItem("line-leave:login-attempt:" + LIFF_ID); } catch (e) {}
 
     idToken = liff.getIDToken() || "";
 
